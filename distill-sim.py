@@ -56,7 +56,7 @@ def init_synthetic_data(dataset, args):
 
 def main(args):
     wandb.init(
-        project="TAGC",
+        project="TAGC-distill-sim",
         name=f"{args.dataset_name}-{args.num_syn}-{args.init_pair}-{args.seed}",
         config=args,
     )
@@ -76,6 +76,9 @@ def main(args):
     expert_model.load_state_dict(torch.load(os.path.join(str(buffer_save_dir), f"expert_state_{args.use_text_emb}.pt")))
     expert_model.eval()
 
+    expert_acc = epoch_test(model=expert_model, test_loader=test_loader, args=args)
+    print(expert_acc)
+
     eval_it_pool = np.arange(0, args.iterations, args.eval_interval).tolist()
 
     criterion = MultilabelContrastiveLoss(args.loss_type).to(args.device)
@@ -83,18 +86,12 @@ def main(args):
     graph_syn, text_syn, subgraph_labels = init_synthetic_data(graph_dataset, args)
     syn_dataset = SynTAGDataset(graph_syn, text_syn, args)
 
-    scheduler = Scheduler(dataset=graph_dataset,
-                          batch_size=args.num_target,
-                          max_iteration=args.cl_iterations,
-                          strategy=args.cl_strategy,
-                          init_proportion=args.cl_init_proportion)
-    # scheduler.difficulty_measure(expert_logits=expert_logits)
+    scheduler = Scheduler(dataset=graph_dataset, batch_size=args.num_target)
     scheduler.update_schedule()
 
     for it in tqdm(range(args.iterations), desc="distill", position=0, leave=True):
         if it in eval_it_pool:
             acc_list = []
-            ft_acc_list = []
             for _ in tqdm(range(args.num_eval), desc="eval", position=1, leave=False):
                 eval_model = CLIP(args).to(args.device)
 
@@ -115,22 +112,9 @@ def main(args):
                     if acc > best_acc:
                         best_acc = acc
                 acc_list.append(best_acc)
-                # all_labels = test_loader.dataset.all_labels
-                # labels_desc = test_loader.dataset.labels_desc
-                # coop = CoOp(args, all_labels, eval_model, labels_desc)
-                # ft_index, ft_test_index = create_few_shot_index(test_loader.dataset)
-                #
-                # best_acc = 0
-                # for epoch in range(args.ft_epochs_eval):
-                #     epoch_ft(coop, test_loader, ft_index, args)
-                #     acc = epoch_ft_test(coop, test_loader, ft_test_index, args)
-                #     if acc > best_acc:
-                #         best_acc = acc
-                # ft_acc_list.append(best_acc)
 
             print(f"Test Acc: {np.mean(acc_list)}")
             wandb.log({"test_acc": np.mean(acc_list)}, step=it)
-            # wandb.log({"ft_test_acc": np.mean(ft_acc_list)}, step=it)
 
         syn_dataset.set_train_model()
         syn_dataset.zero_grad()
@@ -175,7 +159,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="photo")
+    parser.add_argument("--dataset_name", type=str, default="arxiv")
     parser.add_argument("--buffer_save_dir", type=str, default="./buffer")
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--seed", type=int, default=44)
@@ -185,14 +169,11 @@ if __name__ == "__main__":
     parser.add_argument("--num_syn", type=int, default=200)
     parser.add_argument("--init_pair", type=str, default="random")
     parser.add_argument("--syn_graph_lr", type=float, default=100)
-    parser.add_argument("--lr_lr", type=float, default=1e-6)
+    parser.add_argument("--lr_lr", type=float, default=2e-6)
     parser.add_argument("--syn_steps", type=int, default=15)
     parser.add_argument("--mini_batch_size", type=int, default=20)
     parser.add_argument("--num_target", type=int, default=2000)
     parser.add_argument("--loss_type", type=str, default="WBCE")
-    parser.add_argument("--cl_strategy", type=str, default="none")
-    parser.add_argument("--cl_init_proportion", type=float, default=0.4)
-    parser.add_argument("--cl_iterations", type=int, default=1000)
 
     # eval
     parser.add_argument("--eval_interval", type=int, default=500)
@@ -229,7 +210,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args.device = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
-    if args.dataset_name == "cora" or args.dataset_name == "arxiv" or args.dataset_name == "art":
+    if args.dataset_name == "cora" or args.dataset_name == "art":
         args.gnn_input_dim = 128
         args.gnn_hidden_dim = 128
         args.gnn_output_dim = 128

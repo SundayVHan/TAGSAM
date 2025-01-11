@@ -120,11 +120,11 @@ def load_data(dataset, seed=0):
         # for i in range(len(c_descs)):
         #     c_descs[i] = classes[i] + c_descs[i]
 
-    # elif dataset == 'ogbn-products':
-    #     from data.data_utils.load_products import get_raw_text_products as get_raw_text
-    #     num_classes = 47
-    #     classes = []
-    #     c_descs = []
+    elif dataset == 'products':
+        from data.data_utils.load_products import get_raw_text_products as get_raw_text
+        num_classes = 47
+        classes = []
+        c_descs = []
     # elif dataset == 'arxiv_2023':
     #     from data.data_utils.load_arxiv_2023 import get_raw_text_arxiv_2023 as get_raw_text
     #     num_classes = 40

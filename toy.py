@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from torch_geometric.utils import k_hop_subgraph
 
 from data.dataset import GraphDataset
+from epoch import epoch_test
 from model import CLIP
 
 
@@ -15,30 +16,13 @@ def main(args):
     graph_dataset = GraphDataset(args)
     test_loader = DataLoader(graph_dataset, batch_size=args.batch_size_test_eval, shuffle=False)
 
-    origin_node_f = graph_dataset.node_f.to(args.device)
-    origin_edge_index = graph_dataset.edge_index.to(args.device)
-    if args.use_text_emb:
-        origin_texts = graph_dataset.text_embeds.to(args.device)
-    else:
-        origin_texts = graph_dataset.text_list
-
     buffer_save_dir = os.path.join(args.buffer_save_dir, args.dataset_name, args.graph_encoder, args.text_encoder)
     expert_model = CLIP(args).to(args.device)
     expert_model.load_state_dict(torch.load(os.path.join(str(buffer_save_dir), f"expert_state_{args.use_text_emb}.pt")))
     expert_model.eval()
 
-    for i in range(10):
-        # center_node = np.random.randint(0, len(origin_node_f))
-        # subset, _, _, _ = k_hop_subgraph(
-        #     center_node, num_hops=1, edge_index=test_loader.dataset.edge_index, relabel_nodes=False
-        # )
-        # subset = subset[:5].to(args.device)
-        subset = torch.randint(0, len(origin_node_f), (5,)).to(args.device)
-        label = test_loader.dataset.label_list[subset.cpu().numpy()]
-        expert_logits = expert_model(origin_node_f, origin_edge_index, subset, origin_texts[subset], is_eval=True)
-        print(label)
-        print(expert_logits)
-        print(f'----------------------------\n')
+    expert_acc = epoch_test(model=expert_model, test_loader=test_loader, args=args)
+    print(expert_acc)
 
 
 if __name__ == "__main__":
@@ -47,9 +31,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="photo")
+    parser.add_argument("--dataset_name", type=str, default="arxiv")
     parser.add_argument("--buffer_save_dir", type=str, default="./buffer")
-    parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--gpu", type=int, default=1)
 
     # distill
     parser.add_argument("--iterations", type=int, default=5000)
@@ -97,7 +81,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args.device = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
-    if args.dataset_name == "cora" or args.dataset_name == "arxiv" or args.dataset_name == "art":
+    if args.dataset_name == "cora"  or args.dataset_name == "art":
         args.gnn_input_dim = 128
         args.gnn_hidden_dim = 128
         args.gnn_output_dim = 128

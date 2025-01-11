@@ -15,7 +15,8 @@ from torch.utils.data import Subset, DataLoader
 from torch_geometric.utils import k_hop_subgraph
 from tqdm import tqdm
 
-from model import TextEncoder
+import pmi
+from model import TextEncoder, GPT2
 from pmi import get_npmi_matrix
 
 
@@ -370,6 +371,7 @@ def summary_text(dataset, select_idx, args):
             merged_sentences = [' '.join(sentences[i:i + combine]) for i in range(0, len(sentences), combine)]
             all_sentences.extend(merged_sentences)
 
+        pmi.model = GPT2(device=args.device)
         normalised, matrix, surprise = get_npmi_matrix(all_sentences, batch_size=5)
         matrix[matrix < 0] = 0
 

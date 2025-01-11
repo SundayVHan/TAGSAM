@@ -14,12 +14,13 @@ import argparse
 
 nlp = spacy.load("en_core_web_sm")
 
-model = GPT2(device="cuda")
+model = None
 
 def get_probabilities(articles):
     """
     Given a batch of articles (can be any strings) run a forward pass on GPT2 and obtain word probabilities for the same
     """
+
     article_splits = [article.split(" ") for article in articles]
     payload = model.get_probabilities(articles, topk=20)
     res = [[] for i in range(len(articles))]

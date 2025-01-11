@@ -56,7 +56,7 @@ def init_synthetic_data(dataset, args):
 
 def main(args):
     wandb.init(
-        project="TAGC",
+        project="TAGC-distill-mtt",
         name=f"{args.dataset_name}-{args.num_syn}-{args.init_pair}-{args.seed}-MTT",
         config=args,
     )
@@ -70,25 +70,18 @@ def main(args):
     while os.path.exists(os.path.join(str(buffer_save_dir), "replay_buffer_{}.pt".format(n))):
         temp_trajectory = torch.load(os.path.join(str(buffer_save_dir), f"replay_buffer_{n}.pt"))
         param_trajectories.append(temp_trajectory)
+        n += 1
 
     eval_it_pool = np.arange(0, args.iterations, args.eval_interval).tolist()
 
     graph_syn, text_syn, subgraph_labels = init_synthetic_data(graph_dataset, args)
     syn_dataset = SynTAGDataset(graph_syn, text_syn, args)
 
-    scheduler = Scheduler(dataset=graph_dataset,
-                          batch_size=args.num_target,
-                          max_iteration=args.cl_iterations,
-                          strategy=args.cl_strategy,
-                          init_proportion=args.cl_init_proportion)
-    # scheduler.difficulty_measure(expert_logits=expert_logits)
-    scheduler.update_schedule()
     expert_idx = 0
 
     for it in tqdm(range(args.iterations), desc="distill", position=0, leave=True):
         if it in eval_it_pool:
             acc_list = []
-            ft_acc_list = []
             for _ in tqdm(range(args.num_eval), desc="eval", position=1, leave=False):
                 eval_model = CLIP(args).to(args.device)
 
@@ -104,7 +97,8 @@ def main(args):
 
                 best_acc = 0
                 for epoch in range(args.train_epochs_eval):
-                    epoch_train(model=eval_model, optimizer=eval_optimizer, train_loader=eval_train_loader, args=args, is_distill=True)
+                    epoch_train(model=eval_model, optimizer=eval_optimizer, train_loader=eval_train_loader, args=args,
+                                is_distill=True)
                     acc = epoch_test(model=eval_model, test_loader=test_loader, args=args, is_distill=True)
                     if acc > best_acc:
                         best_acc = acc
@@ -112,7 +106,6 @@ def main(args):
 
             print(f"Test Acc: {np.mean(acc_list)}")
             wandb.log({"test_acc": np.mean(acc_list)}, step=it)
-            # wandb.log({"ft_test_acc": np.mean(ft_acc_list)}, step=it)
 
         param_trajectory = param_trajectories[expert_idx]
         expert_idx += 1
@@ -126,9 +119,9 @@ def main(args):
         start_epoch = np.random.randint(0, args.max_start_epoch)
 
         student_model = ReparamModule(CLIP(args)).to(args.device)
-        student_param_start = torch.cat([p.detach().reshape(-1) for p in param_trajectory[start_epoch]], dim=0)
-        student_param_target = torch.cat([p.detach().reshape(-1) for p in param_trajectory[start_epoch+args.match_epoch]], dim=0)
-        student_param = student_param_start.clone().requires_grad_(True)
+        student_param_start = torch.cat([p.detach().reshape(-1) for p in param_trajectory[start_epoch]], dim=0).to(args.device)
+        student_param_target = torch.cat([p.detach().reshape(-1) for p in param_trajectory[start_epoch+args.match_epoch]], dim=0).to(args.device)
+        student_param = student_param_start.clone().requires_grad_(True).to(args.device)
         syn_loader = DataLoader(syn_dataset, batch_size=args.mini_batch_size, shuffle=True)
 
         for step in range(args.syn_steps):
@@ -153,7 +146,7 @@ def main(args):
         text_param_loss = torch.nn.functional.mse_loss(text_param, text_param_target, reduction="sum")
         text_param_dist = torch.nn.functional.mse_loss(text_param_start, text_param_target, reduction="sum")
 
-        syn_loss = graph_param_loss / graph_param_dist + text_param_loss / text_param_dist
+        syn_loss = (graph_param_loss / graph_param_dist + text_param_loss / text_param_dist) / 2
 
         syn_dataset.compute_grad(syn_loss)
         syn_dataset.update()
@@ -193,6 +186,8 @@ if __name__ == "__main__":
     parser.add_argument("--cl_strategy", type=str, default="none")
     parser.add_argument("--cl_init_proportion", type=float, default=0.4)
     parser.add_argument("--cl_iterations", type=int, default=1000)
+    parser.add_argument("--max_start_epoch", type=int, default=10)
+    parser.add_argument("--match_epoch", type=int, default=3)
 
     # eval
     parser.add_argument("--eval_interval", type=int, default=500)
@@ -228,8 +223,8 @@ if __name__ == "__main__":
     parser.add_argument("--ablation_cl_reverse", type=bool, default=True)
 
     args = parser.parse_args()
-    args.device = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
-    if args.dataset_name == "cora" or args.dataset_name == "arxiv" or args.dataset_name == "art":
+    args.device = f"cuda:{args.gpu}"
+    if args.dataset_name == "cora" or args.dataset_name == "art":
         args.gnn_input_dim = 128
         args.gnn_hidden_dim = 128
         args.gnn_output_dim = 128

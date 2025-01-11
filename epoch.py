@@ -57,44 +57,24 @@ def epoch_test(
     all_labels = test_loader.dataset.all_labels
     if args.use_text_emb:
         all_labels_embeds = test_loader.dataset.all_labels_embeds.to(args.device)
-    task_list, train_idx, val_idx, test_idx = multitask_data_generator(label_list, labeled_ids, all_labels, args.k_spt,
-                                                                       args.k_val, args.k_qry, args.n_way)
+    test_labels, test_samples = test_loader.dataset.get_test_labels_samples()
 
     node_f = test_loader.dataset.node_f.to(args.device)
     edge_index = test_loader.dataset.edge_index.to(args.device)
 
     acc_list = []
-    for j in tqdm(range(len(task_list)), disable=is_distill):
-        ground_truth = label_list[test_idx[j]]
-        task_all_labels = all_labels[task_list[j]]
+    for labels_idx, samples_idx in zip(test_labels, test_samples):
+        ground_truth = label_list[samples_idx]
 
-        if args.use_text_emb:
-            text_input = all_labels_embeds[task_list[j]]
-        else:
-            text_input = task_all_labels.tolist()
+        text_input = all_labels_embeds[labels_idx]
+        labels = all_labels[labels_idx]
 
-        logits = model(node_f, edge_index, test_idx[j], text_input, is_eval=True)
+        logits = model(node_f, edge_index, samples_idx, text_input, is_eval=True)
         pred = logits.argmax(dim=-1).cpu().numpy().reshape(-1)
-        y_pred = task_all_labels[pred]
+        y_pred = labels[pred]
         acc = accuracy_score(ground_truth, y_pred)
         acc_list.append(acc)
     acc = np.mean(acc_list)
-
-    # node_f = test_loader.dataset.node_f.to(args.device)
-    # edge_index = test_loader.dataset.edge_index.to(args.device)
-    #
-    # ground_truth = label_list
-    #
-    # if args.use_text_emb:
-    #     text_input = all_labels_embeds
-    # else:
-    #     text_input = all_labels.tolist()
-    #
-    # target_idx = np.arange(len(label_list))
-    # logits = model(node_f, edge_index, target_idx, text_input, is_eval=True)
-    # pred = logits.argmax(dim=-1).cpu().numpy().reshape(-1)
-    # y_pred = all_labels[pred]
-    # acc = accuracy_score(ground_truth, y_pred)
 
     return round(acc, 4)
 

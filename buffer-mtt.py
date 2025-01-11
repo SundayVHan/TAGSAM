@@ -25,8 +25,6 @@ def main(args):
     train_loader = DataLoader(graph_dataset, batch_size=args.batch_size_train, shuffle=True)
     test_loader = DataLoader(graph_dataset, batch_size=args.batch_size_test, shuffle=False)
 
-    param_trajectory = []
-
     for it in range(0, args.num_expert):
         expert_model = CLIP(args).to(args.device)
 
@@ -36,17 +34,15 @@ def main(args):
         ])
         optimizer.zero_grad()
 
-        param_timestamp = [[p.detach().cpu() for p in expert_model.parameters()]]
+        param_trajectory = [[p.detach().cpu() for p in expert_model.parameters()]]
 
         for e in range(args.num_epochs):
             epoch_train(model=expert_model, optimizer=optimizer, train_loader=train_loader, args=args)
             acc = epoch_test(model=expert_model, test_loader=test_loader, args=args)
 
-            param_timestamp.append([p.detach().cpu() for p in expert_model.graph_encoder.parameters()])
+            param_trajectory.append([p.detach().cpu() for p in expert_model.parameters()])
             wandb.log({f"acc": acc}, step=e)
             print(f"Epoch {e} Acc: {acc}")
-
-        param_trajectory.append(param_timestamp)
 
         n = 0
         while os.path.exists(os.path.join(str(buffer_save_dir), "replay_buffer_{}.pt".format(n))):
@@ -60,7 +56,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="computer")
+    parser.add_argument("--dataset_name", type=str, default="photo")
     parser.add_argument("--buffer_save_dir", type=str, default="./buffer")
     parser.add_argument("--num_epochs", type=int, default=15)
     parser.add_argument("--gpu", type=int, default=0)
@@ -91,7 +87,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     args.device = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
-    if args.dataset_name == "cora" or args.dataset_name == "arxiv" or args.dataset_name == "art":
+    if args.dataset_name == "cora" or args.dataset_name == "art":
         args.gnn_input_dim = 128
         args.gnn_hidden_dim = 128
         args.gnn_output_dim = 128

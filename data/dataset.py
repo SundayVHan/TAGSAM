@@ -128,18 +128,20 @@ class GraphDataset(Dataset):
             self.all_labels_embeds = None
             self.process_text2emb()
 
+        self.test_labels = None
+        self.test_samples = None
+        self.test_split()
+
     def __len__(self):
         return len(self.node_f)
 
     def __getitem__(self, idx):
         if self.args.use_text_emb:
             text_embed = self.text_embeds[idx]
-            label_idx = np.where(self.all_labels == self.label_list[idx])
-            return idx, text_embed, label_idx
+            return idx, text_embed
         else:
             text = self.text_list[idx]
-            label_idx = np.where(self.all_labels == self.label_list[idx])
-            return idx, text, label_idx
+            return idx, text
 
     @torch.no_grad()
     def process_text2emb(self):
@@ -165,8 +167,9 @@ class GraphDataset(Dataset):
             del batch_embeds
             torch.cuda.empty_cache()
 
+        labels_with_desc = [f"{label} {desc}" for label, desc in zip(self.all_labels, self.labels_desc)]
         for i in tqdm(range(0, len(self.all_labels), batch_size)):
-            batch_texts = self.all_labels[i:i + batch_size]
+            batch_texts = labels_with_desc[i:i + batch_size]
             batch_embeds = text_encoder(batch_texts).detach().cpu()
 
             all_labels_embeds.append(batch_embeds)
@@ -182,6 +185,26 @@ class GraphDataset(Dataset):
         }
         with open(cache_file, 'wb') as f:
             pickle.dump(cache_data, f)
+
+    def test_split(self):
+        num_labels = len(self.all_labels)
+        n_way = self.args.n_way
+        num_groups = num_labels // n_way
+
+        labels = []
+        samples = []
+        for i in range(num_groups):
+            test_labels = self.all_labels[i*n_way:(i+1)*n_way]
+            test_labels_idx = [np.where(self.all_labels == label)[0][0] for label in test_labels]
+            labels.append(test_labels_idx)
+
+            test_samples_idx = np.where(np.isin(self.label_list, test_labels))[0]
+            samples.append(test_samples_idx)
+        self.test_labels = labels
+        self.test_samples = samples
+
+    def get_test_labels_samples(self):
+        return self.test_labels, self.test_samples
 
 
 class SynTAGDataset(Dataset):
@@ -239,27 +262,3 @@ class SynTAGDataset(Dataset):
 
     def zero_grad(self):
         self.optimizer.zero_grad()
-
-
-class SimpleDataset(Dataset):
-    def __init__(self, syn_graph, syn_text_emb, syn_text_list, args):
-        self.args = args
-
-        self.node_f = syn_graph.detach().to(args.device)
-        self.edge_index = torch.empty((2, 0), dtype=torch.long, device=args.device)
-
-        if args.use_text_emb:
-            self.text_embeds = syn_text_emb
-        else:
-            self.text_list = syn_text_list
-
-    def __len__(self):
-        return len(self.node_f)
-
-    def __getitem__(self, idx):
-        if self.args.use_text_emb:
-            text_embed = self.text_embeds[idx]
-            return idx, text_embed
-        else:
-            text = self.text_list[idx]
-            return idx, text
