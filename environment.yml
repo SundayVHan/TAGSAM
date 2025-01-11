@@ -141,5 +141,5 @@ dependencies:
       - xxhash==3.5.0
       - yarl==1.18.3
       - --find-links https://data.pyg.org/whl/torch-2.5.0+cu121.html
-      - -extra-index-url https://download.pytorch.org/whl/cu121
+      - --extra-index-url https://download.pytorch.org/whl/cu121
 prefix: /home/hanhaowei/miniconda3/envs/TAGC
