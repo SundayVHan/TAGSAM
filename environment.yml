@@ -42,7 +42,6 @@ dependencies:
       - datasets==3.2.0
       - dill==0.3.8
       - docker-pycreds==0.4.0
-      - en-core-web-sm==3.8.0
       - filelock==3.13.1
       - fonttools==4.55.3
       - frozenlist==1.5.0
@@ -142,4 +141,6 @@ dependencies:
       - wrapt==1.17.0
       - xxhash==3.5.0
       - yarl==1.18.3
+      - --find-links https://data.pyg.org/whl/torch-2.5.0+cu121.html
+      - --find-links https://download.pytorch.org/whl/cu121
 prefix: /home/hanhaowei/miniconda3/envs/TAGC
