@@ -27,7 +27,7 @@ class Scheduler:
 
         result = self.schedule[self.index:self.index+self.batch_size]
         self.index += self.batch_size
-        return result
+        return torch.tensor(result)
 
     def update_schedule(self):
         self.schedule = np.random.permutation(range(len(self.dataset)))

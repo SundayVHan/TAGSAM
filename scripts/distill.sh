@@ -1,31 +1,21 @@
-python distill-mtt.py --gpu 0 --init_pair random --seed 42 --dataset_name computer --num_syn 200
-python distill-mtt.py --gpu 0 --init_pair random --seed 43 --dataset_name computer --num_syn 200
-python distill-mtt.py --gpu 0 --init_pair random --seed 44 --dataset_name computer --num_syn 200
+#!/bin/bash
 
-python distill-mtt.py --gpu 0 --init_pair random --seed 42 --dataset_name photo --num_syn 100
-python distill-mtt.py --gpu 0 --init_pair random --seed 43 --dataset_name photo --num_syn 100
-python distill-mtt.py --gpu 0 --init_pair random --seed 44 --dataset_name photo --num_syn 100
+DATASET_NAME="art"
+GPU=0
+INIT_PAIR="random"
+SEEDS=(42 43 44)
+NUM_SYNS=(100 200 500)
 
-python distill-mtt.py --gpu 0 --init_pair random --seed 42 --dataset_name computer --num_syn 100
-python distill-mtt.py --gpu 0 --init_pair random --seed 43 --dataset_name computer --num_syn 100
-python distill-mtt.py --gpu 0 --init_pair random --seed 44 --dataset_name computer --num_syn 100
+# python buffer.py --dataset_name $DATASET_NAME --gpu $GPU --num_epochs 3
 
-python distill-mtt.py --gpu 0 --init_pair random --seed 42 --dataset_name arxiv --num_syn 100
-python distill-mtt.py --gpu 0 --init_pair random --seed 43 --dataset_name arxiv --num_syn 100
-python distill-mtt.py --gpu 0 --init_pair random --seed 44 --dataset_name arxiv --num_syn 100
+for NUM_SYN in "${NUM_SYNS[@]}"; do
+  for SEED in "${SEEDS[@]}"; do
+    python distill-sim.py --gpu $GPU --init_pair $INIT_PAIR --seed $SEED --dataset_name $DATASET_NAME --num_syn $NUM_SYN
+  done
+done
 
-python distill-mtt.py --gpu 0 --init_pair random --seed 42 --dataset_name arxiv --num_syn 500
-python distill-mtt.py --gpu 0 --init_pair random --seed 43 --dataset_name arxiv --num_syn 500
-python distill-mtt.py --gpu 0 --init_pair random --seed 44 --dataset_name arxiv --num_syn 500
-
-python distill-sim.py --gpu 0 --init_pair random --seed 42 --dataset_name photo --num_syn 500
-python distill-sim.py --gpu 0 --init_pair random --seed 43 --dataset_name photo --num_syn 500
-python distill-sim.py --gpu 0 --init_pair random --seed 44 --dataset_name photo --num_syn 500
-
-python distill-sim.py --gpu 0 --init_pair summary --seed 42 --dataset_name computer --num_syn 500
-python distill-sim.py --gpu 0 --init_pair summary --seed 43 --dataset_name computer --num_syn 500
-python distill-sim.py --gpu 0 --init_pair summary --seed 44 --dataset_name computer --num_syn 500
-
-python distill-sim.py --gpu 0 --init_pair random --seed 42 --dataset_name arxiv --num_syn 500
-python distill-sim.py --gpu 0 --init_pair random --seed 43 --dataset_name arxiv --num_syn 500
-python distill-sim.py --gpu 0 --init_pair random --seed 44 --dataset_name arxiv --num_syn 500
+for NUM_SYN in "${NUM_SYNS[@]}"; do
+  for SEED in "${SEEDS[@]}"; do
+    python distill-sim.py --gpu $GPU --init_pair "summary" --seed $SEED --dataset_name $DATASET_NAME --num_syn $NUM_SYN
+  done
+done

@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch import optim
 from torch.cuda import graph
 from torch_geometric.nn import GCNConv
-from torch_geometric.utils import add_self_loops
+from torch_geometric.utils import add_self_loops, k_hop_subgraph
 from transformers import BertModel, BertTokenizer, GPT2Tokenizer, GPT2LMHeadModel
 
 
@@ -53,8 +53,16 @@ class GraphEncoder(nn.Module):
         else:
             raise ValueError('Invalid graph encoder')
 
-    def forward(self, x, edge_index):
-        return self.model(x, edge_index)
+    def forward(self, x, edge_index, node_idx):
+        if x.shape[0] < 1000000:
+            return self.model(x, edge_index)[node_idx]
+        else:
+            sub_nodes, sub_edge_index, mapping, _ = k_hop_subgraph(node_idx, 2, edge_index, relabel_nodes=True)
+
+            sub_x = x[sub_nodes]
+            all_node_embedding = self.model(sub_x, sub_edge_index)
+            selected_node_embedding = all_node_embedding[mapping]
+            return selected_node_embedding
 
 
 class TextProjection(nn.Module):
@@ -111,8 +119,7 @@ class CLIP(nn.Module):
             return loss, logits
 
     def encode_graph(self, node_f, edge_index, node_idx):
-        graph_emb = self.graph_encoder(node_f, edge_index)
-        graph_emb = graph_emb[node_idx]
+        graph_emb = self.graph_encoder(node_f, edge_index, node_idx)
         graph_emb = graph_emb / graph_emb.norm(dim=1, keepdim=True)
         return graph_emb
 

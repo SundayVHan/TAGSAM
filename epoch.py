@@ -53,7 +53,6 @@ def epoch_test(
     model.to(args.device)
 
     label_list = test_loader.dataset.label_list
-    labeled_ids = test_loader.dataset.labeled_ids
     all_labels = test_loader.dataset.all_labels
     if args.use_text_emb:
         all_labels_embeds = test_loader.dataset.all_labels_embeds.to(args.device)
@@ -68,8 +67,9 @@ def epoch_test(
 
         text_input = all_labels_embeds[labels_idx]
         labels = all_labels[labels_idx]
+        node_idx = torch.from_numpy(samples_idx).to(args.device)
 
-        logits = model(node_f, edge_index, samples_idx, text_input, is_eval=True)
+        logits = model(node_f, edge_index, node_idx, text_input, is_eval=True)
         pred = logits.argmax(dim=-1).cpu().numpy().reshape(-1)
         y_pred = labels[pred]
         acc = accuracy_score(ground_truth, y_pred)

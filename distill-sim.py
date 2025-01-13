@@ -210,7 +210,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args.device = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
-    if args.dataset_name == "cora" or args.dataset_name == "art":
+    if args.dataset_name == "cora":
         args.gnn_input_dim = 128
         args.gnn_hidden_dim = 128
         args.gnn_output_dim = 128

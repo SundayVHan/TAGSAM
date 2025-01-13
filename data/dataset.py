@@ -31,9 +31,7 @@ def read_edge_index(dataset_name):
     return edge_index
 
 def read_node_features(dataset_name):
-    node_f = np.load(f'./data/{dataset_name}/node_f.npy')
-    node_f = preprocessing.StandardScaler().fit_transform(node_f)
-    node_f = torch.from_numpy(node_f)
+    node_f = torch.load(f'./data/{dataset_name}/node_f.pt')
     return node_f
 
 def read_text_list(dataset_name):
@@ -132,6 +130,7 @@ class GraphDataset(Dataset):
         self.test_samples = None
         self.test_split()
 
+
     def __len__(self):
         return len(self.node_f)
 
@@ -187,14 +186,18 @@ class GraphDataset(Dataset):
             pickle.dump(cache_data, f)
 
     def test_split(self):
-        num_labels = len(self.all_labels)
+        filtered_labels = [label for label in self.all_labels if label != "nan"]
+        filtered_labels = np.array(filtered_labels)
+        np.random.seed(0)
+        filtered_labels = filtered_labels[np.random.permutation(len(filtered_labels))]
+        num_labels = len(filtered_labels)
         n_way = self.args.n_way
         num_groups = num_labels // n_way
 
         labels = []
         samples = []
         for i in range(num_groups):
-            test_labels = self.all_labels[i*n_way:(i+1)*n_way]
+            test_labels = filtered_labels[i*n_way:(i+1)*n_way]
             test_labels_idx = [np.where(self.all_labels == label)[0][0] for label in test_labels]
             labels.append(test_labels_idx)
 

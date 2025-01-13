@@ -1,8 +1,11 @@
 import os
 import random
+from datetime import datetime
+from pyexpat import features
 
 import numpy as np
 import torch
+import wandb
 from torch.utils.data import DataLoader
 from torch_geometric import seed_everything
 from tqdm import tqdm
@@ -13,6 +16,10 @@ from model import CLIP
 
 @torch.no_grad()
 def extract_features(model, dataloader, args):
+    buffer_save_dir = os.path.join(args.buffer_save_dir, args.dataset_name, args.graph_encoder, args.text_encoder)
+    if os.path.exists(os.path.join(buffer_save_dir, f"features.pt")):
+        features = torch.load(os.path.join(buffer_save_dir, f"features.pt"))
+        return features
     graph_feature = []
     text_feature = []
 
@@ -31,6 +38,7 @@ def extract_features(model, dataloader, args):
     text_feature = torch.cat(text_feature, dim=0)
 
     feature = torch.cat([graph_feature, text_feature], dim=1)
+    torch.save(feature, os.path.join(buffer_save_dir, f"features.pt"))
 
     return feature
 
@@ -38,57 +46,72 @@ def extract_features(model, dataloader, args):
 def herding_algorithm(model, dataloader, coreset_size, args):
     # 提取特征
     features = extract_features(model, dataloader, args)
-    features = features.cpu().detach().numpy()
+    features = features.to(args.device)
 
     # 计算数据集中心
-    dataset_center = np.mean(features, axis=0)
+    dataset_center = torch.mean(features, dim=0)
 
     # 初始化核心集
     coreset_idx = []
     coreset_features = []
+    selected_mask = torch.zeros(features.size(0), dtype=torch.bool, device=args.device)
 
     # 迭代选择样本
     for _ in tqdm(range(coreset_size), desc="herding", position=1, leave=False):
         if len(coreset_features) == 0:
-            coreset_center = np.zeros_like(dataset_center)
+            coreset_center = torch.zeros_like(dataset_center)
         else:
-            coreset_center = np.mean(coreset_features, axis=0)
+            coreset_center = torch.mean(torch.stack(coreset_features), dim=0)
 
         # 计算每个样本到核心集中心的距离
-        distances = np.linalg.norm(features - coreset_center, axis=1)
+        batch_size = 1024  # 根据 GPU 内存情况调整这个值
+        distances = []
+        for i in range(0, features.size(0), batch_size):
+            batch_features = features[i:i + batch_size]
+            batch_distances = torch.norm(batch_features - coreset_center, dim=1)
+            distances.append(batch_distances)
+        distances = torch.cat(distances)
+        distances[selected_mask] = float('inf')
 
         # 找到距离最近的样本
-        closest_index = np.argmin(distances)
+        closest_index = torch.argmin(distances).item()
 
         # 添加该样本到核心集
         coreset_idx.append(closest_index)
         coreset_features.append(features[closest_index])
 
-        features = np.delete(features, closest_index, axis=0)
+        selected_mask[closest_index] = True
 
     return coreset_idx
 
 
 def k_center_algorithm(model, dataloader, coreset_size, args):
     features = extract_features(model, dataloader, args)
-    features = features.cpu().detach().numpy()
+    features = features.to(args.device)
 
     # 随机选择一个初始中心
     num_samples = features.shape[0]
-    initial_index = np.random.choice(num_samples)
+    initial_index = torch.randint(0, num_samples, (1,), device=args.device).item()
     centers = [features[initial_index]]
     selected_indices = [initial_index]
 
     # 迭代选择中心点
     for _ in tqdm(range(1, coreset_size), desc="k_center", position=1, leave=False):
         # 计算每个样本到最近中心的最小距离
-        min_distances = np.min(
-            [np.linalg.norm(features - center, axis=1) for center in centers],
-            axis=0
-        )
+        min_distances = torch.full((num_samples,), float('inf'), device=args.device)
+
+        # 分批计算距离
+        batch_size = 1024  # 根据 GPU 内存情况调整这个值
+        for i in range(0, num_samples, batch_size):
+            batch_features = features[i:i + batch_size]
+            batch_distances = torch.stack([torch.norm(batch_features - center, dim=1) for center in centers])
+            batch_min_distances = torch.min(batch_distances, dim=0).values
+
+            # 更新全局最小距离
+            min_distances[i:i + batch_size] = torch.min(min_distances[i:i + batch_size], batch_min_distances)
 
         # 找到距离最近中心最远的样本
-        next_center_index = np.argmax(min_distances)
+        next_center_index = torch.argmax(min_distances).item()
         centers.append(features[next_center_index])
         selected_indices.append(next_center_index)
 
@@ -96,6 +119,12 @@ def k_center_algorithm(model, dataloader, coreset_size, args):
 
 
 def main(args):
+    wandb.init(
+        project="TAGC-coreset",
+        name=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        config=args,
+    )
+
     dataset = GraphDataset(args)
     test_loader = DataLoader(dataset, batch_size=args.batch_size_test_eval, shuffle=False)
 
@@ -115,12 +144,11 @@ def main(args):
     node_f = dataset.node_f
     graph_syn = torch.stack([node_f[dataset[i][0]] for i in selected_idx])
     text_syn = torch.stack([dataset[i][1] for i in selected_idx])
-    print(selected_idx.shape)
     mask = (torch.isin(dataset.edge_index[0], selected_idx) & torch.isin(dataset.edge_index[1], selected_idx))
     adj = dataset.edge_index[:, mask]
     adj_mapped = torch.stack([torch.tensor([index_map[idx.item()] for idx in adj_row]) for adj_row in adj])
     eval_dataset = SynTAGDataset(graph_syn, text_syn, args)
-    eval_dataset.edge_index = adj_mapped
+    # eval_dataset.edge_index = adj_mapped
 
     acc_list = []
     for _ in tqdm(range(args.num_eval), desc="eval", position=1, leave=False):
@@ -148,6 +176,7 @@ def main(args):
         acc_list.append(best_acc)
 
     print(f"Test Acc: {np.mean(acc_list)}")
+    wandb.log({"Test Acc": np.mean(acc_list)})
 
 
 if __name__ == '__main__':
