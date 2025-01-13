@@ -12,11 +12,7 @@ import pickle
 import spacy
 import argparse
 
-nlp = spacy.load("en_core_web_sm")
-
-model = None
-
-def get_probabilities(articles):
+def get_probabilities(model, articles):
     """
     Given a batch of articles (can be any strings) run a forward pass on GPT2 and obtain word probabilities for the same
     """
@@ -61,7 +57,7 @@ def get_probabilities(articles):
     return res
 
 
-def get_npmi_matrix(sentences, method=1, batch_size=1):
+def get_npmi_matrix(model, sentences, method=1, batch_size=1):
     """
     Accepts a list of sentences of length n and returns 3 objects:
     - Normalised PMI nxn matrix - temp
@@ -81,7 +77,7 @@ def get_npmi_matrix(sentences, method=1, batch_size=1):
     c = 0
     p = []
     for i in range(len(sentences)):
-        result = get_probabilities([sentences[i]])
+        result = get_probabilities(model, [sentences[i]])
         try:
             p.append(sum([math.log(i) for i in result[0]]))
         except:
@@ -102,7 +98,7 @@ def get_npmi_matrix(sentences, method=1, batch_size=1):
             if batchCount == batchSize or (i == len(sentences) - 1 and j == len(sentences) - 1):
                 # print(batch)
                 c += 1
-                result = get_probabilities(batch)
+                result = get_probabilities(model, batch)
                 for key in batch_indices.keys():
                     # print(key)
                     # print(key.split("-"))

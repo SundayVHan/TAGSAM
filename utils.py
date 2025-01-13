@@ -326,11 +326,11 @@ def aggregate_text(dataset, select_idx, args):
 
 
 def summary_text(dataset, select_idx, args):
-    text_encoder = TextEncoder(args).to(args.device)
     text_aggregate = []
     feature_aggregate =[]
-    text_list = np.array(dataset.text_list)
+    text_list = dataset.text_list
     nlp = spacy.load("en_core_web_sm")
+    model = GPT2(device=args.device)
 
     def remove_unicode(text):
         return ''.join([i if ord(i) < 128 else ' ' for i in text])
@@ -344,35 +344,33 @@ def summary_text(dataset, select_idx, args):
         if len(subset) > 4:
             subset = np.array(random.sample(subset.tolist(), 4))
 
-        sub_texts = text_list[subset]
+        sub_texts = [text_list[i] for i in subset]
 
         num_sentences = 0
+        sentences_list = []
         for sub_text in sub_texts:
             doc = nlp(str(sub_text))
             sentences = [remove_unicode(sentence.text) for sentence in doc.sents]
             num_sentences += len(sentences)
+            sentences_list.append(sentences)
 
         sentence_ranges = []
         start_idx = 0
         combine = 5
-        for sub_text in sub_texts:
-            doc = nlp(str(sub_text))
-            sentences = [remove_unicode(sentence.text) for sentence in doc.sents]
-
+        for i in range(len(sub_texts)):
+            sentences = sentences_list[i]
             merged_sentences = [' '.join(sentences[i:i + combine]) for i in range(0, len(sentences), combine)]
 
             sentence_ranges.append((start_idx, start_idx + len(merged_sentences)))
             start_idx += len(merged_sentences)
 
         all_sentences = []
-        for sub_text in sub_texts:
-            doc = nlp(str(sub_text))
-            sentences = [remove_unicode(sentence.text) for sentence in doc.sents]
+        for i in range(len(sub_texts)):
+            sentences = sentences_list[i]
             merged_sentences = [' '.join(sentences[i:i + combine]) for i in range(0, len(sentences), combine)]
             all_sentences.extend(merged_sentences)
 
-        pmi.model = GPT2(device=args.device)
-        normalised, matrix, surprise = get_npmi_matrix(all_sentences, batch_size=5)
+        normalised, matrix, surprise = get_npmi_matrix(model, all_sentences, batch_size=5)
         matrix[matrix < 0] = 0
 
         relevance = [sum(matrix[idx]) for idx in range(len(all_sentences))]
@@ -411,6 +409,11 @@ def summary_text(dataset, select_idx, args):
 
         feature_aggregate.append(sub_feature)
 
+    del nlp
+    del model
+    torch.cuda.empty_cache()
+
+    text_encoder = TextEncoder(args).to(args.device)
     text_embeds = text_encoder(text_aggregate)
     node_embeds = torch.stack(feature_aggregate)
     return node_embeds, text_embeds

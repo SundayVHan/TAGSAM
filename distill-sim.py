@@ -159,15 +159,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="arxiv")
+    parser.add_argument("--dataset_name", type=str, default="art")
     parser.add_argument("--buffer_save_dir", type=str, default="./buffer")
     parser.add_argument("--gpu", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=44)
+    parser.add_argument("--seed", type=int, default=42)
 
     # distill
     parser.add_argument("--iterations", type=int, default=5001)
-    parser.add_argument("--num_syn", type=int, default=200)
-    parser.add_argument("--init_pair", type=str, default="random")
+    parser.add_argument("--num_syn", type=int, default=1)
+    parser.add_argument("--init_pair", type=str, default="summary")
     parser.add_argument("--syn_graph_lr", type=float, default=100)
     parser.add_argument("--lr_lr", type=float, default=2e-6)
     parser.add_argument("--syn_steps", type=int, default=15)

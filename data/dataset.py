@@ -194,15 +194,26 @@ class GraphDataset(Dataset):
         n_way = self.args.n_way
         num_groups = num_labels // n_way
 
+        label_to_all_index = {label: idx for idx, label in enumerate(self.all_labels)}
+
+        label_to_list_index = {}
+        for idx, label in enumerate(self.label_list):
+            if label not in label_to_list_index:
+                label_to_list_index[label] = []
+            label_to_list_index[label].append(idx)
+
+        label_to_list_index = {label: np.array(indices) for label, indices in label_to_list_index.items()}
+
         labels = []
         samples = []
         for i in range(num_groups):
-            test_labels = filtered_labels[i*n_way:(i+1)*n_way]
-            test_labels_idx = [np.where(self.all_labels == label)[0][0] for label in test_labels]
+            test_labels = filtered_labels[i * n_way: (i + 1) * n_way]
+            test_labels_idx = [label_to_all_index[label] for label in test_labels]
             labels.append(test_labels_idx)
 
-            test_samples_idx = np.where(np.isin(self.label_list, test_labels))[0]
+            test_samples_idx = np.concatenate([label_to_list_index[label] for label in test_labels])
             samples.append(test_samples_idx)
+
         self.test_labels = labels
         self.test_samples = samples
 

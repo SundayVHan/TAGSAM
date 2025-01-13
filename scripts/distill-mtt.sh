@@ -1,11 +1,11 @@
 #!/bin/bash
 
 DATASET_NAME="art"
-GPU=1
+GPU=0
 SEEDS=(42 43 44)
 NUM_SYNS=(100 200 500)
 
-python buffer-mtt.py --dataset_name $DATASET_NAME --gpu $GPU --num_epochs 3
+python buffer-mtt.py --dataset_name $DATASET_NAME --gpu $GPU --num_epochs 3 --num_expert 3
 
 for NUM_SYN in "${NUM_SYNS[@]}"; do
   for SEED in "${SEEDS[@]}"; do
