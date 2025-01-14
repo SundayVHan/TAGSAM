@@ -279,15 +279,17 @@ class GPT2:
                 - Strings in the sequence along with start token
         """
         with torch.no_grad():
-            start_tok = torch.full((1, 1), self.enc.encoder[self.start_tok],
-                                   device=self.device, dtype=torch.long)
+            print("in_text: ", in_text)
             context = [self.start_tok + " " + in_text[i] for i in range(len(in_text))]
             context = [self.enc.encode(context[i]) for i in range(len(context))]
             context = self.pad(context)
             context = torch.tensor(context, device=self.device, dtype=torch.long)
+            print("Encoded context: ", context)
             output = self.model(context)
             logits = output.logits
+            print("Logits: ", logits)
             yhat = torch.softmax(logits[:, :-1], dim=-1)
+            print("yhat: ", yhat)
             y = context[:, 1:]
             real_topk_probs = [yhat[t][np.arange(0, y[t].shape[0], 1), y[t]].data.cpu().numpy().tolist() for t in
                                range(yhat.shape[0])]
@@ -298,6 +300,7 @@ class GPT2:
 
             context_strings = [[self.enc.decoder[s.item()] for s in context[t]] for t in range(len(context))]
             context_strings = [[self.postprocess(s) for s in context_strings[t]] for t in range(len(context_strings))]
+            print("Processed context strings: ", context_strings)
             del context, logits, y, yhat,
             torch.cuda.empty_cache()
         """ 

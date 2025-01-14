@@ -188,8 +188,10 @@ class GraphDataset(Dataset):
     def test_split(self):
         filtered_labels = [label for label in self.all_labels if label != "nan"]
         filtered_labels = np.array(filtered_labels)
-        np.random.seed(0)
-        filtered_labels = filtered_labels[np.random.permutation(len(filtered_labels))]
+        if self.args.dataset_name == "art":
+            np.random.seed(0)
+            filtered_labels = filtered_labels[np.random.permutation(len(filtered_labels))]
+            np.random.seed(self.args.seed)
         num_labels = len(filtered_labels)
         n_way = self.args.n_way
         num_groups = num_labels // n_way
