@@ -73,7 +73,8 @@ def main(args):
 
     buffer_save_dir = os.path.join(args.buffer_save_dir, args.dataset_name, args.graph_encoder, args.text_encoder)
     expert_model = CLIP(args).to(args.device)
-    expert_model.load_state_dict(torch.load(os.path.join(str(buffer_save_dir), f"expert_state_{args.use_text_emb}.pt")))
+    expert_state = torch.load(os.path.join(str(buffer_save_dir), f"expert_state_{args.use_text_emb}.pt"))
+    expert_model.load_state_dict(expert_state)
     expert_model.eval()
 
     expert_acc = epoch_test(model=expert_model, test_loader=test_loader, args=args)
@@ -159,15 +160,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="art")
+    parser.add_argument("--dataset_name", type=str, default="photo")
     parser.add_argument("--buffer_save_dir", type=str, default="./buffer")
     parser.add_argument("--gpu", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=43)
 
     # distill
     parser.add_argument("--iterations", type=int, default=5001)
-    parser.add_argument("--num_syn", type=int, default=1)
-    parser.add_argument("--init_pair", type=str, default="summary")
+    parser.add_argument("--num_syn", type=int, default=200)
+    parser.add_argument("--init_pair", type=str, default="random")
     parser.add_argument("--syn_graph_lr", type=float, default=100)
     parser.add_argument("--lr_lr", type=float, default=2e-6)
     parser.add_argument("--syn_steps", type=int, default=15)
@@ -185,6 +186,8 @@ if __name__ == "__main__":
     parser.add_argument('--coop_n_ctx', type=int, default=10)
     parser.add_argument('--prompt_lr', type=float, default=0.01)
     parser.add_argument('--context_length', type=int, default=128)
+    parser.add_argument("--num_summary", type=int, default=4)
+    parser.add_argument("--ratio_summary", type=float, default=0.6)
 
     # text type
     parser.add_argument("--use_text_emb", type=bool, default=True)
