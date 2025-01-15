@@ -314,11 +314,36 @@ def load_data(dataset, seed=0):
             "which power your business or organization with reliable and high-performance servers. From entry-level servers for small businesses to enterprise-grade solutions for data centers, these servers offer robust computing power, storage capacity, and advanced features.",
             "which extend the life of your tablet by replacing worn-out or damaged components. Find official replacement parts like batteries, screens, cameras, and other essential components to restore your tablet's functionality."
         ]
-    # elif dataset == 'history':
-    #     from data.data_utils.load_history import get_raw_text_history as get_raw_text
-    #     class_desc = pd.read_csv("./processed_data/categories/history_categories.csv")
-    #     classes = class_desc['name'].tolist()
-    #     c_descs = class_desc['description'].tolist()
+    elif dataset == 'history':
+        from data.data_utils.load_history import get_raw_text_history as get_raw_text
+        classes = [
+            "World",
+            "Americas",
+            "Asia",
+            "Military",
+            "Europe",
+            "Russia",
+            "Africa",
+            "Ancient Civilizations",
+            "Middle East",
+            "Historical Study & Educational Resources",
+            "Australia & Oceania",
+            "Arctic & Antarctica"
+        ]
+        c_descs = [
+            "which explores global events and trends throughout history.",
+            "which delves into the rich history of North, Central, and South America.",
+            "which focuses on the diverse cultures and historical developments in Asia.",
+            "which examines wars, conflicts, military strategy, and their impact on history.",
+            "which covers the complex history of the European continent.",
+            "which specifically studies the history of Russia, its empires, and its role in the world.",
+            "which explores the vast and diverse histories of African nations and cultures.",
+            "which investigates the origins, rise, and fall of early civilizations.",
+            "which examines the history of the Middle East, including its cultures and pivotal events.",
+            "which provides tools, guides, and resources for the study of history.",
+            "which focuses on the history of Australia, New Zealand, and Pacific Island nations.",
+            "which explores the history and significance of the polar regions."
+        ]
     elif dataset == "instagram":
         from data.data_utils.load_instagram import get_raw_text_instagram as get_raw_text
         classes = ['Normal Users', 'Commercial Users']
