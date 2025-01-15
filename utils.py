@@ -337,12 +337,19 @@ def summary_text(dataset, select_idx, args):
 
     for center_node in tqdm(select_idx):
         center_node = torch.tensor([center_node])
-        subset, _, _, _ = k_hop_subgraph(
-            center_node, num_hops=1, edge_index=dataset.edge_index, relabel_nodes=False
-        )
+        hop = 0
 
-        if len(subset) > 4:
-            subset = np.array(random.sample(subset.tolist(), 4))
+        subset = []
+        while len(subset) < args.num_summary:
+            hop += 1
+            subset, _, _, _ = k_hop_subgraph(
+                center_node, num_hops=hop, edge_index=dataset.edge_index, relabel_nodes=False
+            )
+            if hop > 3:
+                break
+        subset = np.array(subset.tolist())
+        if len(subset) > args.num_summary:
+            subset = subset[:args.num_summary]
 
         sub_texts = [text_list[i] for i in subset]
 
@@ -377,7 +384,8 @@ def summary_text(dataset, select_idx, args):
         penalty = [0 for _ in range(len(all_sentences))]
         selected = []
 
-        num_selected_sentences = int(len(all_sentences) * 0.6)
+        ratio = float(args.ratio_summary) / 100
+        num_selected_sentences = int(len(all_sentences) * ratio)
         for k in range(num_selected_sentences):
             maxIdx = -1
             maxVal = -float('inf')
