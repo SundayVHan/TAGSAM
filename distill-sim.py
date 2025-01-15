@@ -73,7 +73,7 @@ def main(args):
 
     buffer_save_dir = os.path.join(args.buffer_save_dir, args.dataset_name, args.graph_encoder, args.text_encoder)
     expert_model = CLIP(args).to(args.device)
-    expert_state = torch.load(os.path.join(str(buffer_save_dir), f"expert_state_{args.use_text_emb}.pt"))
+    expert_state = torch.load(os.path.join(str(buffer_save_dir), f"expert_state_{args.use_text_emb}.pt"), map_location=args.device)
     expert_model.load_state_dict(expert_state)
     expert_model.eval()
 
