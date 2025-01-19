@@ -63,6 +63,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size_train", type=int, default=1024)
     parser.add_argument("--batch_size_test", type=int, default=1024)
     parser.add_argument("--num_expert", type=int, default=10)
+    parser.add_argument("--seed", type=int, default=43)
 
     # text type
     parser.add_argument("--use_text_emb", type=bool, default=True)

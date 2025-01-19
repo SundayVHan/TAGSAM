@@ -1,4 +1,6 @@
+import json
 import math
+import os.path
 import pickle
 import random
 from collections import defaultdict, Counter
@@ -331,6 +333,7 @@ def summary_text(dataset, select_idx, args):
     text_list = dataset.text_list
     nlp = spacy.load("en_core_web_sm")
     model = GPT2(device=args.device)
+    ratio = float(args.ratio_summary) / 100
 
     def remove_unicode(text):
         return ''.join([i if ord(i) < 128 else ' ' for i in text])
@@ -347,9 +350,9 @@ def summary_text(dataset, select_idx, args):
             )
             if hop > 3:
                 break
-        subset = np.array(subset.tolist())
         if len(subset) > args.num_summary:
             subset = subset[:args.num_summary]
+        subset = np.array(subset.tolist())
 
         sub_texts = [text_list[i] for i in subset]
 
@@ -384,7 +387,6 @@ def summary_text(dataset, select_idx, args):
         penalty = [0 for _ in range(len(all_sentences))]
         selected = []
 
-        ratio = float(args.ratio_summary) / 100
         num_selected_sentences = int(len(all_sentences) * ratio)
         for k in range(num_selected_sentences):
             maxIdx = -1

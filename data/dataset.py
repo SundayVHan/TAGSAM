@@ -239,10 +239,8 @@ class SynTAGDataset(Dataset):
         ])
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=200, gamma=0.95)
 
-        if args.use_text_emb:
-            self.text_embeds = syn_text
-        else:
-            self.text_list = syn_text
+        self.text_embeds = syn_text
+        self.text_list = []
 
     def __len__(self):
         return len(self.node_f)
