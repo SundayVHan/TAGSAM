@@ -1,3 +1,4 @@
+import json
 import os
 import random
 
@@ -46,18 +47,19 @@ def init_synthetic_data(dataset, args):
     else:
         text_syn = [dataset[i][1] for i in idx_shuffle]
 
+    text_summary = []
     if args.init_pair == "aggregate":
-        graph_syn, text_syn = aggregate_text(dataset, idx_shuffle, args)
+        graph_syn, text_syn, text_summary = aggregate_text(dataset, idx_shuffle, args)
     elif args.init_pair == "summary":
-        graph_syn, text_syn = summary_text(dataset, idx_shuffle, args)
+        graph_syn, text_syn, text_summary = summary_text(dataset, idx_shuffle, args)
 
-    return graph_syn, text_syn, subgraph_labels
+    return graph_syn, text_syn, subgraph_labels, text_summary
 
 
 def main(args):
     wandb.init(
         project="TAGC-distill-sim",
-        name=f"{args.dataset_name}-{args.num_syn}-{args.init_pair}-{args.seed}",
+        name=args.name,
         config=args,
     )
 
@@ -71,9 +73,8 @@ def main(args):
     else:
         origin_texts = graph_dataset.text_list
 
-    buffer_save_dir = os.path.join(args.buffer_save_dir, args.dataset_name, args.graph_encoder, args.text_encoder)
     expert_model = CLIP(args).to(args.device)
-    expert_state = torch.load(os.path.join(str(buffer_save_dir), f"expert_state_{args.use_text_emb}.pt"), map_location=args.device)
+    expert_state = torch.load(os.path.join(str(args.buffer_save_dir), f"expert_state_{args.use_text_emb}.pt"), map_location=args.device)
     expert_model.load_state_dict(expert_state)
     expert_model.eval()
 
@@ -84,7 +85,7 @@ def main(args):
 
     criterion = MultilabelContrastiveLoss(args.loss_type).to(args.device)
 
-    graph_syn, text_syn, subgraph_labels = init_synthetic_data(graph_dataset, args)
+    graph_syn, text_syn, subgraph_labels, text_summary = init_synthetic_data(graph_dataset, args)
     syn_dataset = SynTAGDataset(graph_syn, text_syn, args)
 
     scheduler = Scheduler(dataset=graph_dataset, batch_size=args.num_target)
@@ -151,6 +152,12 @@ def main(args):
             "text_lr": syn_dataset.student_lr_text.item(),
         }, step=it)
 
+    torch.save(syn_dataset.node_f, os.path.join(str(args.buffer_save_dir), f"{args.name}_node_f.pt"))
+    torch.save(syn_dataset.text_embeds, os.path.join(str(args.buffer_save_dir), f"{args.name}_text_embeds.pt"))
+    torch.save(syn_dataset.student_lr_graph, os.path.join(str(args.buffer_save_dir), f"{args.name}_student_lr_graph.pt"))
+    torch.save(syn_dataset.student_lr_text, os.path.join(str(args.buffer_save_dir), f"{args.name}_student_lr_text.pt"))
+    with open(os.path.join(str(args.buffer_save_dir), f"{args.name}_raw_text.json"), "w") as file:
+        json.dump(text_summary, file)
     wandb.finish()
 
 
@@ -167,8 +174,8 @@ if __name__ == "__main__":
 
     # distill
     parser.add_argument("--iterations", type=int, default=5001)
-    parser.add_argument("--num_syn", type=int, default=200)
-    parser.add_argument("--init_pair", type=str, default="random")
+    parser.add_argument("--num_syn", type=int, default=100)
+    parser.add_argument("--init_pair", type=str, default="summary")
     parser.add_argument("--syn_graph_lr", type=float, default=100)
     parser.add_argument("--lr_lr", type=float, default=2e-6)
     parser.add_argument("--syn_steps", type=int, default=15)
@@ -187,7 +194,7 @@ if __name__ == "__main__":
     parser.add_argument('--prompt_lr', type=float, default=0.01)
     parser.add_argument('--context_length', type=int, default=128)
     parser.add_argument("--num_summary", type=int, default=4)
-    parser.add_argument("--ratio_summary", type=float, default=0.6)
+    parser.add_argument("--ratio_summary", type=float, default=60)
 
     # text type
     parser.add_argument("--use_text_emb", type=bool, default=True)
@@ -213,6 +220,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args.device = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
+    args.buffer_save_dir = os.path.join(args.buffer_save_dir, args.dataset_name, args.graph_encoder, args.text_encoder)
+    args.name = f"{args.dataset_name}-{args.num_syn}-{args.init_pair}-{args.seed}-{args.num_summary}-{args.ratio_summary}"
     if args.dataset_name == "cora":
         args.gnn_input_dim = 128
         args.gnn_hidden_dim = 128

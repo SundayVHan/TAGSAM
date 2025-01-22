@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import random
@@ -58,7 +59,7 @@ def init_synthetic_data(dataset, args):
 
 def main(args):
     wandb.init(
-        project="TAGC-distill-mtt",
+        project="TAGC-distill-mtt-cross",
         name=args.name,
         config=args,
     )
@@ -80,34 +81,41 @@ def main(args):
     syn_dataset = SynTAGDataset(graph_syn, text_syn, args)
 
     expert_idx = 0
+    gnn_model = ["mlp", "sage", "sgc", "gcn", "appnp", "cheby"]
 
     for it in tqdm(range(args.iterations), desc="distill", position=0, leave=True):
         if it in eval_it_pool:
-            acc_list = []
-            for _ in tqdm(range(args.num_eval), desc="eval", position=1, leave=False):
-                eval_model = CLIP(args).to(args.device)
+            for gnn_type in gnn_model:
+                acc_list = []
+                for _ in tqdm(range(args.num_eval), desc="eval", position=1, leave=False):
+                    args_copy = copy.copy(args)
+                    args_copy.graph_encoder = gnn_type
+                    eval_model = CLIP(args_copy).to(args.device)
 
-                syn_dataset.set_eval_model()
-                student_lr_graph = syn_dataset.student_lr_graph.item()
-                student_lr_text = syn_dataset.student_lr_text.item()
+                    syn_dataset.set_eval_model()
 
-                eval_train_loader = DataLoader(syn_dataset, batch_size=args.batch_size_train_eval, shuffle=True)
-                eval_optimizer = torch.optim.SGD([
-                    {"params": eval_model.graph_encoder.parameters(), "lr": student_lr_graph, "momentum": 0.9, "weight_decay": 5e-4},
-                    {"params": eval_model.text_encoder.parameters(), "lr": student_lr_text, "momentum": 0.9, "weight_decay": 5e-4},
-                ])
+                    student_lr_graph = syn_dataset.student_lr_graph.item()
+                    student_lr_text = syn_dataset.student_lr_text.item()
 
-                best_acc = 0
-                for epoch in range(args.train_epochs_eval):
-                    epoch_train(model=eval_model, optimizer=eval_optimizer, train_loader=eval_train_loader, args=args,
-                                is_distill=True)
-                    acc = epoch_test(model=eval_model, test_loader=test_loader, args=args, is_distill=True)
-                    if acc > best_acc:
-                        best_acc = acc
-                acc_list.append(best_acc)
+                    eval_train_loader = DataLoader(syn_dataset, batch_size=args.batch_size_train_eval, shuffle=True)
+                    eval_optimizer = torch.optim.SGD([
+                        {"params": eval_model.graph_encoder.parameters(), "lr": student_lr_graph, "momentum": 0.9,
+                         "weight_decay": 5e-4},
+                        {"params": eval_model.text_encoder.parameters(), "lr": student_lr_text, "momentum": 0.9,
+                         "weight_decay": 5e-4},
+                    ])
 
-            print(f"Test Acc: {np.mean(acc_list)}")
-            wandb.log({"test_acc": np.mean(acc_list)}, step=it)
+                    best_acc = 0
+                    for epoch in range(args.train_epochs_eval):
+                        epoch_train(model=eval_model, optimizer=eval_optimizer, train_loader=eval_train_loader,
+                                    args=args, is_distill=True)
+                        acc = epoch_test(model=eval_model, test_loader=test_loader, args=args, is_distill=True)
+                        if acc > best_acc:
+                            best_acc = acc
+                    acc_list.append(best_acc)
+
+                print(f"{gnn_type}_test_acc", np.mean(acc_list))
+                wandb.log({f"{gnn_type}_test_acc": np.mean(acc_list)}, step=it)
 
         param_trajectory = param_trajectories[expert_idx]
         expert_idx += 1

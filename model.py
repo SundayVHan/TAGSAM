@@ -4,9 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
 from torch.cuda import graph
-from torch_geometric.nn import GCNConv
+from torch_geometric.nn import GCNConv, SAGEConv, ChebConv, APPNP
 from torch_geometric.utils import add_self_loops, k_hop_subgraph
-from transformers import BertModel, BertTokenizer, GPT2Tokenizer, GPT2LMHeadModel
+from transformers import BertModel, BertTokenizer, GPT2Tokenizer, GPT2LMHeadModel, AutoTokenizer, AutoModelForMaskedLM, \
+    RobertaModel, RobertaTokenizer, T5Model, T5Tokenizer
 
 
 class GCN(nn.Module):
@@ -22,16 +23,84 @@ class GCN(nn.Module):
         x = self.conv2(x, edge_index)
         return x
 
+class MLP(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(MLP, self).__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x, edge_index=None):
+        x = self.fc1(x)
+        x = F.leaky_relu(x)
+        x = self.fc2(x)
+        return x
+
+class SGC(nn.Module):
+    def __init__(self, input_dim, output_dim, K=2):
+        super(SGC, self).__init__()
+        self.K = K  # Number of propagation steps
+        self.conv = GCNConv(input_dim, output_dim, cached=True)
+
+    def forward(self, x, edge_index):
+        for _ in range(self.K):
+            x = self.conv(x, edge_index)
+        return x
+
+class GraphSAGE(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(GraphSAGE, self).__init__()
+        self.conv1 = SAGEConv(input_dim, hidden_dim)
+        self.conv2 = SAGEConv(hidden_dim, output_dim)
+
+    def forward(self, x, edge_index):
+        x = self.conv1(x, edge_index)
+        x = F.leaky_relu(x)
+        x = self.conv2(x, edge_index)
+        return x
+
+class Cheby(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, K=2):
+        super(Cheby, self).__init__()
+        self.conv1 = ChebConv(input_dim, hidden_dim, K)
+        self.conv2 = ChebConv(hidden_dim, output_dim, K)
+
+    def forward(self, x, edge_index):
+        x = self.conv1(x, edge_index)
+        x = F.leaky_relu(x)
+        x = self.conv2(x, edge_index)
+        return x
+
+class APPNPNet(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, K=10, alpha=0.1):
+        super(APPNPNet, self).__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.appnp = APPNP(K=K, alpha=alpha)
+
+    def forward(self, x, edge_index):
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        x = self.appnp(x, edge_index)
+        return x
 
 class TextEncoder(nn.Module):
     def __init__(self, args):
         super(TextEncoder, self).__init__()
         self.args = args
 
-        self.model = BertModel.from_pretrained('bert-base-uncased')
-        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        self.target_token_idx = 0
-
+        if args.text_encoder == "bert":
+            self.model = BertModel.from_pretrained('bert-base-uncased')
+            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+            self.target_token_idx = 0
+        elif args.text_encoder == "roberta":
+            self.model = RobertaModel.from_pretrained("FacebookAI/roberta-base")
+            self.tokenizer = RobertaTokenizer.from_pretrained("FacebookAI/roberta-base")
+            self.target_token_idx = 0
+        elif args.text_encoder == "t5":
+            self.model = T5Model.from_pretrained("google-t5/t5-base")
+            self.tokenizer = T5Tokenizer.from_pretrained("google-t5/t5-base")
+            self.target_token_idx = 0
         if args.use_text_emb:
             self.requires_grad_(False)
 
@@ -50,6 +119,16 @@ class GraphEncoder(nn.Module):
 
         if args.graph_encoder == 'gcn':
             self.model = GCN(args.gnn_input_dim, args.gnn_hidden_dim, args.gnn_output_dim)
+        elif args.graph_encoder == 'mlp':
+            self.model = MLP(args.gnn_input_dim, args.gnn_hidden_dim, args.gnn_output_dim)
+        elif args.graph_encoder == 'sgc':
+            self.model = SGC(args.gnn_input_dim, args.gnn_output_dim)
+        elif args.graph_encoder == 'sage':
+            self.model = GraphSAGE(args.gnn_input_dim, args.gnn_hidden_dim, args.gnn_output_dim)
+        elif args.graph_encoder == 'cheby':
+            self.model = Cheby(args.gnn_input_dim, args.gnn_hidden_dim, args.gnn_output_dim)
+        elif args.graph_encoder == 'appnp':
+            self.model = APPNPNet(args.gnn_input_dim, args.gnn_hidden_dim, args.gnn_output_dim)
         else:
             raise ValueError('Invalid graph encoder')
 

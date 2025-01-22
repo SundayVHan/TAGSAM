@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import random
@@ -11,7 +12,7 @@ from tqdm import tqdm
 import wandb
 from data.dataset import GraphDataset
 from epoch import epoch_train, epoch_test, epoch_train_manual, epoch_ft, epoch_ft_test
-from model import CLIP, CoOp
+from model import CLIP, CoOp, TextEncoder
 from reparam_module import ReparamModule
 from scheduler import Scheduler
 from similarity_mining import MultilabelContrastiveLoss, calculate_cmi_emp
@@ -47,7 +48,7 @@ def init_synthetic_data(dataset, args):
     else:
         text_syn = [dataset[i][1] for i in idx_shuffle]
 
-    text_summary = []
+    text_summary = [dataset.text_list[i] for i in idx_shuffle]
     if args.init_pair == "aggregate":
         graph_syn, text_syn = aggregate_text(dataset, idx_shuffle, args)
     elif args.init_pair == "summary":
@@ -58,7 +59,7 @@ def init_synthetic_data(dataset, args):
 
 def main(args):
     wandb.init(
-        project="TAGC-distill-mtt",
+        project="TAGC-distill-cross",
         name=args.name,
         config=args,
     )
@@ -66,64 +67,82 @@ def main(args):
     graph_dataset = GraphDataset(args)
     test_loader = DataLoader(graph_dataset, batch_size=args.batch_size_test_eval, shuffle=False)
 
-    buffer_save_dir = args.buffer_save_dir
-    n = 0
-    param_trajectories = []
-    while os.path.exists(os.path.join(str(buffer_save_dir), "replay_buffer_{}.pt".format(n))):
-        temp_trajectory = torch.load(os.path.join(str(buffer_save_dir), f"replay_buffer_{n}.pt"))
-        param_trajectories.append(temp_trajectory)
-        n += 1
+    origin_node_f = graph_dataset.node_f.to(args.device)
+    origin_edge_index = graph_dataset.edge_index.to(args.device)
+    if args.use_text_emb:
+        origin_texts = graph_dataset.text_embeds.to(args.device)
+    else:
+        origin_texts = graph_dataset.text_list
+
+    expert_model = CLIP(args).to(args.device)
+    expert_state = torch.load(os.path.join(str(args.buffer_save_dir), f"expert_state_{args.use_text_emb}.pt"), map_location=args.device)
+    expert_model.load_state_dict(expert_state)
+    expert_model.eval()
+
+    expert_acc = epoch_test(model=expert_model, test_loader=test_loader, args=args)
+    print(expert_acc)
 
     eval_it_pool = np.arange(0, args.iterations, args.eval_interval).tolist()
+
+    criterion = MultilabelContrastiveLoss(args.loss_type).to(args.device)
 
     graph_syn, text_syn, subgraph_labels, text_summary = init_synthetic_data(graph_dataset, args)
     syn_dataset = SynTAGDataset(graph_syn, text_syn, args)
 
-    expert_idx = 0
+    args_copy = copy.copy(args)
+    args_copy.text_encoder = "roberta"
+    roberta_encoder = TextEncoder(args_copy).to(args.device)
+    roberta_embeds = roberta_encoder(text_summary)
+
+    test_dataset = copy.deepcopy(graph_dataset)
+    labels_with_desc = [f"{label} {desc}" for label, desc in zip(test_dataset.all_labels, test_dataset.labels_desc)]
+    test_dataset.all_labels_embeds = roberta_encoder(labels_with_desc)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size_test_eval, shuffle=False)
+
+    scheduler = Scheduler(dataset=graph_dataset, batch_size=args.num_target)
+    scheduler.update_schedule()
+
+    gnn_model = ["mlp", "sage", "sgc", "gcn", "appnp", "cheby"]
 
     for it in tqdm(range(args.iterations), desc="distill", position=0, leave=True):
         if it in eval_it_pool:
-            acc_list = []
-            for _ in tqdm(range(args.num_eval), desc="eval", position=1, leave=False):
-                eval_model = CLIP(args).to(args.device)
+            for gnn_type in gnn_model:
+                roberta_acc_list = []
+                for _ in tqdm(range(args.num_eval), desc="eval", position=1, leave=False):
+                    args_copy = copy.copy(args)
+                    args_copy.graph_encoder = gnn_type
+                    eval_model = CLIP(args_copy).to(args.device)
 
-                syn_dataset.set_eval_model()
-                student_lr_graph = syn_dataset.student_lr_graph.item()
-                student_lr_text = syn_dataset.student_lr_text.item()
+                    eval_dataset = copy.deepcopy(syn_dataset)
+                    eval_dataset.set_eval_model()
+                    eval_dataset.text_embeds = roberta_embeds
+                    student_lr_graph = eval_dataset.student_lr_graph.item()
+                    student_lr_text = eval_dataset.student_lr_text.item()
 
-                eval_train_loader = DataLoader(syn_dataset, batch_size=args.batch_size_train_eval, shuffle=True)
-                eval_optimizer = torch.optim.SGD([
-                    {"params": eval_model.graph_encoder.parameters(), "lr": student_lr_graph, "momentum": 0.9, "weight_decay": 5e-4},
-                    {"params": eval_model.text_encoder.parameters(), "lr": student_lr_text, "momentum": 0.9, "weight_decay": 5e-4},
-                ])
+                    eval_train_loader = DataLoader(eval_dataset, batch_size=args.batch_size_train_eval, shuffle=True)
+                    eval_optimizer = torch.optim.SGD([
+                        {"params": eval_model.graph_encoder.parameters(), "lr": student_lr_graph, "momentum": 0.9,
+                         "weight_decay": 5e-4},
+                        {"params": eval_model.text_encoder.parameters(), "lr": student_lr_text, "momentum": 0.9,
+                         "weight_decay": 5e-4},
+                    ])
 
-                best_acc = 0
-                for epoch in range(args.train_epochs_eval):
-                    epoch_train(model=eval_model, optimizer=eval_optimizer, train_loader=eval_train_loader, args=args,
-                                is_distill=True)
-                    acc = epoch_test(model=eval_model, test_loader=test_loader, args=args, is_distill=True)
-                    if acc > best_acc:
-                        best_acc = acc
-                acc_list.append(best_acc)
+                    best_acc = 0
+                    for epoch in range(args.train_epochs_eval):
+                        epoch_train(model=eval_model, optimizer=eval_optimizer, train_loader=eval_train_loader,
+                                    args=args, is_distill=True)
+                        acc = epoch_test(model=eval_model, test_loader=test_loader, args=args, is_distill=True)
+                        if acc > best_acc:
+                            best_acc = acc
+                    roberta_acc_list.append(best_acc)
 
-            print(f"Test Acc: {np.mean(acc_list)}")
-            wandb.log({"test_acc": np.mean(acc_list)}, step=it)
-
-        param_trajectory = param_trajectories[expert_idx]
-        expert_idx += 1
-        if expert_idx == len(param_trajectories):
-            expert_idx = 0
-            np.random.shuffle(param_trajectories)
+                wandb.log({f"roberta_{gnn_type}_test_acc": np.mean(roberta_acc_list)}, step=it)
 
         syn_dataset.set_train_model()
         syn_dataset.zero_grad()
 
-        start_epoch = np.random.randint(0, args.max_start_epoch)
-
         student_model = ReparamModule(CLIP(args)).to(args.device)
-        student_param_start = torch.cat([p.detach().reshape(-1) for p in param_trajectory[start_epoch]], dim=0).to(args.device)
-        student_param_target = torch.cat([p.detach().reshape(-1) for p in param_trajectory[start_epoch+args.match_epoch]], dim=0).to(args.device)
-        student_param = student_param_start.clone().requires_grad_(True).to(args.device)
+        student_param = torch.cat([p.detach().reshape(-1) for p in student_model.parameters()], dim=0).requires_grad_(True)
         syn_loader = DataLoader(syn_dataset, batch_size=args.mini_batch_size, shuffle=True)
 
         for step in range(args.syn_steps):
@@ -134,21 +153,13 @@ def main(args):
                                                      train_loader=syn_loader,
                                                      args=args)
 
-        graph_mask = student_model.get_params_mask_for_module("graph_encoder", student_param)
-        text_mask = student_model.get_params_mask_for_module("text_encoder", student_param)
-        graph_param = student_param[graph_mask]
-        text_param = student_param[text_mask]
-        graph_param_start = student_param_start[graph_mask]
-        text_param_start = student_param_start[text_mask]
-        graph_param_target = student_param_target[graph_mask]
-        text_param_target = student_param_target[text_mask]
+        target_idx = next(scheduler)
+        with torch.no_grad():
+            expert_logits = expert_model(origin_node_f, origin_edge_index, target_idx, origin_texts[target_idx], is_eval=True)
 
-        graph_param_loss = torch.nn.functional.mse_loss(graph_param, graph_param_target, reduction="sum")
-        graph_param_dist = torch.nn.functional.mse_loss(graph_param_start, graph_param_target, reduction="sum")
-        text_param_loss = torch.nn.functional.mse_loss(text_param, text_param_target, reduction="sum")
-        text_param_dist = torch.nn.functional.mse_loss(text_param_start, text_param_target, reduction="sum")
+        student_logits = student_model(origin_node_f, origin_edge_index, target_idx, origin_texts[target_idx], is_eval=True, flat_param=student_param)
 
-        syn_loss = (graph_param_loss / graph_param_dist + text_param_loss / text_param_dist) / 2
+        syn_loss = criterion(student_logits, expert_logits)
 
         syn_dataset.compute_grad(syn_loss)
         syn_dataset.update()
@@ -163,12 +174,10 @@ def main(args):
 
     torch.save(syn_dataset.node_f, os.path.join(str(args.buffer_save_dir), f"{args.name}_node_f.pt"))
     torch.save(syn_dataset.text_embeds, os.path.join(str(args.buffer_save_dir), f"{args.name}_text_embeds.pt"))
-    torch.save(syn_dataset.student_lr_graph,
-               os.path.join(str(args.buffer_save_dir), f"{args.name}_student_lr_graph.pt"))
+    torch.save(syn_dataset.student_lr_graph, os.path.join(str(args.buffer_save_dir), f"{args.name}_student_lr_graph.pt"))
     torch.save(syn_dataset.student_lr_text, os.path.join(str(args.buffer_save_dir), f"{args.name}_student_lr_text.pt"))
     with open(os.path.join(str(args.buffer_save_dir), f"{args.name}_raw_text.json"), "w") as file:
         json.dump(text_summary, file)
-    wandb.finish()
     wandb.finish()
 
 
@@ -181,23 +190,18 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_name", type=str, default="photo")
     parser.add_argument("--buffer_save_dir", type=str, default="./buffer")
     parser.add_argument("--gpu", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=44)
+    parser.add_argument("--seed", type=int, default=42)
 
     # distill
     parser.add_argument("--iterations", type=int, default=5001)
     parser.add_argument("--num_syn", type=int, default=200)
-    parser.add_argument("--init_pair", type=str, default="random")
+    parser.add_argument("--init_pair", type=str, default="summary")
     parser.add_argument("--syn_graph_lr", type=float, default=100)
-    parser.add_argument("--lr_lr", type=float, default=1e-6)
+    parser.add_argument("--lr_lr", type=float, default=2e-6)
     parser.add_argument("--syn_steps", type=int, default=15)
     parser.add_argument("--mini_batch_size", type=int, default=20)
     parser.add_argument("--num_target", type=int, default=2000)
     parser.add_argument("--loss_type", type=str, default="WBCE")
-    parser.add_argument("--cl_strategy", type=str, default="none")
-    parser.add_argument("--cl_init_proportion", type=float, default=0.4)
-    parser.add_argument("--cl_iterations", type=int, default=1000)
-    parser.add_argument("--max_start_epoch", type=int, default=10)
-    parser.add_argument("--match_epoch", type=int, default=3)
 
     # eval
     parser.add_argument("--eval_interval", type=int, default=500)
@@ -209,6 +213,8 @@ if __name__ == "__main__":
     parser.add_argument('--coop_n_ctx', type=int, default=10)
     parser.add_argument('--prompt_lr', type=float, default=0.01)
     parser.add_argument('--context_length', type=int, default=128)
+    parser.add_argument("--num_summary", type=int, default=4)
+    parser.add_argument("--ratio_summary", type=float, default=60)
 
     # text type
     parser.add_argument("--use_text_emb", type=bool, default=True)
@@ -233,7 +239,7 @@ if __name__ == "__main__":
     parser.add_argument("--ablation_cl_reverse", type=bool, default=True)
 
     args = parser.parse_args()
-    args.device = f"cuda:{args.gpu}"
+    args.device = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
     args.buffer_save_dir = os.path.join(args.buffer_save_dir, args.dataset_name, args.graph_encoder, args.text_encoder)
     args.name = f"{args.dataset_name}-{args.num_syn}-{args.init_pair}-{args.seed}-{args.num_summary}-{args.ratio_summary}"
     if args.dataset_name == "cora":

@@ -308,12 +308,20 @@ def aggregate_text(dataset, select_idx, args):
 
     for center_node in tqdm(select_idx):
         center_node = torch.tensor([center_node])
-        subset, _, _, _ = k_hop_subgraph(
-            center_node, num_hops=1, edge_index=dataset.edge_index, relabel_nodes=False
-        )
+        hop = 0
 
-        if len(subset) > 4:
-            subset = np.array(random.sample(subset.tolist(), 4))
+        subset = []
+        while len(subset) < args.num_summary:
+            hop += 1
+            subset, _, _, _ = k_hop_subgraph(
+                center_node, num_hops=hop, edge_index=dataset.edge_index, relabel_nodes=False
+            )
+            if hop > 3:
+                break
+        if len(subset) > args.num_summary:
+            subset = subset[:args.num_summary]
+        subset = np.array(subset.tolist())
+
         sub_texts = text_list[subset]
         sub_text = " ".join(sub_texts)
         text_aggregate.append(sub_text)
@@ -324,10 +332,20 @@ def aggregate_text(dataset, select_idx, args):
 
     text_embeds = text_encoder(text_aggregate)
     node_embeds = torch.stack(feature_aggregate)
-    return node_embeds, text_embeds
+    return node_embeds, text_embeds, text_aggregate
 
 
 def summary_text(dataset, select_idx, args):
+    cache_file_path = os.path.join(args.buffer_save_dir, f"{args.name}_summary_cache.json")
+
+    if os.path.exists(cache_file_path):
+        with open(cache_file_path, "r") as file:
+            cache_data = json.load(file)
+            node_embeds = torch.tensor(cache_data['node_embeds'])
+            text_embeds = torch.tensor(cache_data['text_embeds'])
+            text_aggregate = cache_data['text_aggregate']
+        return node_embeds, text_embeds, text_aggregate
+
     text_aggregate = []
     feature_aggregate =[]
     text_list = dataset.text_list
@@ -426,4 +444,12 @@ def summary_text(dataset, select_idx, args):
     text_encoder = TextEncoder(args).to(args.device)
     text_embeds = text_encoder(text_aggregate)
     node_embeds = torch.stack(feature_aggregate)
-    return node_embeds, text_embeds
+
+    with open(cache_file_path, "w") as file:
+        json.dump({
+            'node_embeds': node_embeds.tolist(),
+            'text_embeds': text_embeds.tolist(),
+            'text_aggregate': text_aggregate
+        }, file)
+
+    return node_embeds, text_embeds, text_aggregate
