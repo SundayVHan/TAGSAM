@@ -47,7 +47,10 @@ def init_synthetic_data(dataset, args):
     else:
         text_syn = [dataset[i][1] for i in idx_shuffle]
 
-    text_summary = []
+    text_summary = [dataset.text_list[i] for i in idx_shuffle]
+    with open(os.path.join(str(args.buffer_save_dir), f"{args.name}_raw_text.json"), "w") as file:
+        json.dump(text_summary, file)
+
     if args.init_pair == "aggregate":
         graph_syn, text_syn = aggregate_text(dataset, idx_shuffle, args)
     elif args.init_pair == "summary":
@@ -168,7 +171,7 @@ def main(args):
     torch.save(syn_dataset.student_lr_text, os.path.join(str(args.buffer_save_dir), f"{args.name}_student_lr_text.pt"))
     with open(os.path.join(str(args.buffer_save_dir), f"{args.name}_raw_text.json"), "w") as file:
         json.dump(text_summary, file)
-    wandb.finish()
+
     wandb.finish()
 
 
@@ -235,7 +238,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.device = f"cuda:{args.gpu}"
     args.buffer_save_dir = os.path.join(args.buffer_save_dir, args.dataset_name, args.graph_encoder, args.text_encoder)
-    args.name = f"{args.dataset_name}-{args.num_syn}-{args.init_pair}-{args.seed}-{args.num_summary}-{args.ratio_summary}-mtt"
+    args.name = f"{args.dataset_name}-{args.num_syn}-{args.seed}-mtt"
     if args.dataset_name == "cora":
         args.gnn_input_dim = 128
         args.gnn_hidden_dim = 128
