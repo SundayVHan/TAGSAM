@@ -235,7 +235,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.device = f"cuda:{args.gpu}"
     args.buffer_save_dir = os.path.join(args.buffer_save_dir, args.dataset_name, args.graph_encoder, args.text_encoder)
-    args.name = f"{args.dataset_name}-{args.num_syn}-{args.init_pair}-{args.seed}-{args.num_summary}-{args.ratio_summary}"
+    args.name = f"{args.dataset_name}-{args.num_syn}-{args.init_pair}-{args.seed}-{args.num_summary}-{args.ratio_summary}-mtt"
     if args.dataset_name == "cora":
         args.gnn_input_dim = 128
         args.gnn_hidden_dim = 128
