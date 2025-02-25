@@ -1,3 +1,3 @@
 # TAGC
-使用environment.yml后要记得
-python -m spacy download en_core_web_sm
+1. environment.yml
+2. python -m spacy download en_core_web_sm
