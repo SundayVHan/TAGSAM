@@ -14,10 +14,33 @@ from epoch import epoch_train, epoch_test, epoch_train_manual, epoch_ft, epoch_f
 from model import CLIP, CoOp
 from reparam_module import ReparamModule
 from scheduler import Scheduler
-from similarity_mining import MultilabelContrastiveLoss, calculate_cmi_emp
 from data.dataset import SynTAGDataset
 from utils import select_balanced_labels, select_cluster_center_labels, select_cluster_boundary_labels, \
     select_subgraph_labels, create_few_shot_index, aggregate_text, summary_text
+
+class wBCELoss(nn.Module):
+    def __init__(self, loss_type=None):
+        super().__init__()
+        self.loss_type = loss_type
+
+    def forward(self, logits, gt_matrix):
+        gt_matrix = gt_matrix.to(logits.device)
+        if self.loss_type == "WBCE":
+            probs1 = torch.sigmoid(logits)
+            probs2 = torch.sigmoid(gt_matrix)
+
+            loss_matrix = - probs2 * torch.log(probs1 + 1e-6) - (1 - probs2) * torch.log(1 - probs1 + 1e-6)
+
+            pos_mask = (probs2 > 0.5).detach()
+            neg_mask = ~pos_mask
+
+            loss_pos = torch.where(pos_mask, loss_matrix, torch.tensor(0.0, device=probs1.device)).sum()
+            loss_neg = torch.where(neg_mask, loss_matrix, torch.tensor(0.0, device=probs1.device)).sum()
+
+            loss_pos /= (pos_mask.sum() + 1e-6)
+            loss_neg /= (neg_mask.sum() + 1e-6)
+
+            return (loss_pos + loss_neg) / 2
 
 
 def init_synthetic_data(dataset, args):
@@ -83,7 +106,7 @@ def main(args):
 
     eval_it_pool = np.arange(0, args.iterations, args.eval_interval).tolist()
 
-    criterion = MultilabelContrastiveLoss(args.loss_type).to(args.device)
+    criterion = wBCELoss(args.loss_type).to(args.device)
 
     graph_syn, text_syn, subgraph_labels, text_summary = init_synthetic_data(graph_dataset, args)
     syn_dataset = SynTAGDataset(graph_syn, text_syn, args)
