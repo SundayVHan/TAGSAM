@@ -18,7 +18,7 @@ python buffer.py --dataset_name computer
 ```
 
 ## Condensation
-Then you can **condense/distill** TAGs into a **smaller** one.
+Then you can **condense/distill** TAG into a **smaller** one.
 ```shell
 python distill.py --dataset_name computer --syn_size 200
 ```
