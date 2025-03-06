@@ -11,14 +11,14 @@ pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -
 pip install -r requirements.txt
 ```
 
-## Buffer
+## Pre-process
 You first need to train a **teacher/expert model** on the original TAG. This process is generally referred to as the **buffer**.
 ```shell
 python buffer.py --dataset_name computer
 ```
 
-## Distill
-Then you can condense TAGs into a smaller one.
+## Condensation
+Then you can **condense/distill** TAGs into a **smaller** one.
 ```shell
 python distill.py --dataset_name computer --syn_size 200
 ```
