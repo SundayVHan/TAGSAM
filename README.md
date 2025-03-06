@@ -22,3 +22,11 @@ Then you can **condense/distill** TAG into a **smaller** one.
 ```shell
 python distill.py --dataset_name computer --syn_size 200
 ```
+
+## Evaluation
+You can automatically perform **asynchronous evaluation** during the condensation process if you set **async_eval** to True.  
+**Note** that you need to ensure the setting **eval_gpu** is correct; otherwise, it may lead to issues such as the GPU not being available, reduced efficiency, and memory overflow (when **gpu** and **eval_gpu** are the same).  
+Additionally, you can also manually trigger the evaluation if needed.
+```shell
+python eval.py --dataset_name computer --syn_size 200
+```

@@ -1,5 +1,8 @@
+import asyncio
 import os
 import random
+import subprocess
+import threading
 
 import numpy as np
 import torch
@@ -15,12 +18,47 @@ from reparam import ReparamModule
 from selection import select_text
 
 
-def main(args):
+def async_eval(it, wandb, args):
+    eval_args = [
+        "--dataset_name", args.dataset_name,
+        "--gpu", str(args.eval_gpu),
+        "--seed", str(args.seed),
+        "--it", str(it),
+        "--syn_size", str(args.syn_size),
+        "--syn_num_summary", str(args.syn_num_summary),
+        "--syn_ratio_summary", str(args.syn_ratio_summary),
+        "--is_distill", "True",
+    ]
+
+    process = subprocess.Popen(
+        ["python", "eval.py"] + eval_args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+
+    stdout, stderr = process.communicate()
+    stdout_str = stdout.decode()
+    if "Accuracy:" in stdout_str:
+        acc = float(stdout_str.split("Accuracy:")[1].strip().split()[0])
+    else:
+        acc = 0.0
+
+    wandb.log({
+        "eval_acc": acc,
+        "iteration": it
+    })
+    return acc
+
+
+async def main(args):
     wandb.init(
         project="TAGSAM-distill",
         name=args.name,
         config=args,
     )
+    wandb.define_metric("iteration")
+    wandb.define_metric("syn_loss", step_metric="iteration")
+    wandb.define_metric("eval_acc", step_metric="iteration")
 
     graph_dataset = GraphDataset(args)
 
@@ -29,10 +67,7 @@ def main(args):
     expert_model.load_state_dict(expert_state)
     expert_model.eval()
 
-    expert_acc = epoch_test(model=expert_model, test_dataset=graph_dataset, args=args)
-    print(f"Expert Acc: {expert_acc}")
-
-    save_it_pool = np.arange(0, args.syn_iteration, args.save_interval).tolist()
+    save_it_pool = np.arange(0, args.syn_iteration+1, args.save_interval).tolist()
     match_loss = wBCELoss()
     match_sampler = NeighborSampler(graph_dataset.edge_index, node_idx=torch.arange(len(graph_dataset)),
                                     sizes=args.sample_size, batch_size=args.syn_match,
@@ -41,8 +76,14 @@ def main(args):
     graph_syn, text_syn, selected_text = select_text(graph_dataset, args)
     syn_dataset = SynGraphDataset(graph_syn, text_syn, args)
 
+    expert_acc = epoch_test(model=expert_model, test_dataset=graph_dataset, args=args)
+    print(f"Expert Acc: {expert_acc}")
+
+    eval_threads = []
+
     for it in tqdm(range(args.syn_iteration), desc="distill", position=0, leave=True):
         if it in save_it_pool:
+            # save synthetic data
             save_data = {
                 "node_f": syn_dataset.node_f,
                 "text_embeds": syn_dataset.text_embeds,
@@ -51,6 +92,12 @@ def main(args):
                 "selected_text": selected_text,
             }
             torch.save(save_data, os.path.join(str(args.buffer_save_dir), f"{args.name}_{it}.pt"))
+
+            # evaluate synthetic data
+            if args.async_eval:
+                eval_thread = threading.Thread(target=async_eval, args=(it, wandb, args))
+                eval_threads.append(eval_thread)
+                eval_thread.start()
 
         torch.cuda.empty_cache()
         syn_dataset.set_train_model()
@@ -83,10 +130,11 @@ def main(args):
 
         wandb.log({
             "syn_loss": syn_loss.item(),
-            "graph_lr": syn_dataset.graph_encoder_lr.item(),
-            "text_lr": syn_dataset.text_encoder_lr.item(),
-        }, step=it)
+            "iteration": it,
+        })
 
+    for eval_thread in eval_threads:
+        eval_thread.join()
     wandb.finish()
 
 
@@ -112,6 +160,10 @@ if __name__ == "__main__":
     parser.add_argument("--syn_num_summary", type=int, default=4)
     parser.add_argument("--syn_ratio_summary", type=float, default=60.0)
 
+    # eval
+    parser.add_argument("--async_eval", type=bool, default=True)
+    parser.add_argument("--eval_gpu", type=int, default=1)
+
     # graph encoder
     parser.add_argument("--graph_encoder", type=str, default="gcn")
     parser.add_argument("--graph_encoder_lr", type=float, default=5e-3)
@@ -132,10 +184,10 @@ if __name__ == "__main__":
     if args.dataset_name == "art":
         args.sample_size = [10, 10]
     else:
-        args.sample_size = [10, 10]
+        args.sample_size = [-1, -1]
 
     seed_everything(args.seed)
-    main(args)
+    asyncio.run(main(args))
 
 
 def seed_everything(seed=42):

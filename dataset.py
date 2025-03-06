@@ -12,7 +12,7 @@ class GraphDataset:
     def __init__(self, args):
         self.args = args
 
-        data = torch.load(f'./data/{args.dataset_name}.pt', weights_only=True)
+        data = torch.load(f'./data/{args.dataset_name}.pt', weights_only=False)
         self.node_f = data['node_f']
         self.edge_index = data['edge_index']
         self.text_list = data['text_list']
@@ -33,7 +33,7 @@ class GraphDataset:
 
     @torch.no_grad()
     def process_text2emb(self):
-        cache_file = f'./data/{self.args.dataset_name}/cache.pt'
+        cache_file = os.path.join(self.args.buffer_save_dir, "cache.pt")
         if os.path.exists(cache_file):
             with open(cache_file, 'rb') as f:
                 cache_data = pickle.load(f)
@@ -112,7 +112,7 @@ class GraphDataset:
         return self.test_labels, self.test_samples
     
     
-class SynGraphDataset:
+class SynGraphDataset(GraphDataset):
     def __init__(self, syn_graph, syn_text, args):
         self.args = args
 
