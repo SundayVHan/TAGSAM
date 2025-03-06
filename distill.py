@@ -144,14 +144,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="computer")
+    parser.add_argument("--dataset_name", type=str, default="art")
     parser.add_argument("--gpu", type=int, default=1)
-    parser.add_argument("--seed", type=int, default=44)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save_interval", type=int, default=500)
 
     # distill
     parser.add_argument("--syn_iteration", type=int, default=5000)
-    parser.add_argument("--syn_size", type=int, default=100)
+    parser.add_argument("--syn_size", type=int, default=1000)
     parser.add_argument("--syn_lr", type=float, default=100)
     parser.add_argument("--syn_lr_lr", type=float, default=2e-6)
     parser.add_argument("--syn_loop", type=int, default=15)
@@ -162,7 +162,7 @@ if __name__ == "__main__":
 
     # eval
     parser.add_argument("--async_eval", type=bool, default=True)
-    parser.add_argument("--eval_gpu", type=int, default=1)
+    parser.add_argument("--eval_gpu", type=int, default=0)
 
     # graph encoder
     parser.add_argument("--graph_encoder", type=str, default="gcn")

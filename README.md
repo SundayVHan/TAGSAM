@@ -10,6 +10,15 @@ pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -
 ```shell
 pip install -r requirements.txt
 ```
+3. Login to wandb
+```shell
+wandb login
+```
+All **results** will be logged to wandb.   
+If you do not want to use wandb, you can set WANDB_MODE to disabled in the config file.
+```shell
+export WANDB_MODE=disabled
+```
 
 ## Pre-process
 You first need to train a **teacher/expert model** on the original TAG. This process is generally referred to as the **buffer**.
