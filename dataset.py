@@ -3,11 +3,8 @@ import pickle
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
-from torch_geometric.data import NeighborSampler
 from tqdm import tqdm
 
-from data.loader import load_data
 from model import TextEncoder
 
 
@@ -15,13 +12,13 @@ class GraphDataset:
     def __init__(self, args):
         self.args = args
 
-        data, text, all_labels, labels_desc = load_data(args.dataset_name)
-        self.edge_index = data.edge_index
-        self.node_f = data.x
-        self.text_list = text
-        self.label_list = np.array([all_labels[i.item()] for i in data.y])
-        self.all_labels = np.array(all_labels)
-        self.labels_desc = np.array(labels_desc)
+        data = torch.load(f'./data/{args.dataset_name}.pt', weights_only=True)
+        self.node_f = data['node_f']
+        self.edge_index = data['edge_index']
+        self.text_list = data['text_list']
+        self.label_list = data['label_list']
+        self.all_labels = data['all_labels']
+        self.labels_desc = data['labels_desc']
 
         self.text_embeds = None
         self.all_labels_embeds = None
@@ -33,7 +30,6 @@ class GraphDataset:
 
     def __len__(self):
         return len(self.node_f)
-
 
     @torch.no_grad()
     def process_text2emb(self):
@@ -121,7 +117,6 @@ class SynGraphDataset:
         self.args = args
 
         self.node_f = syn_graph.detach().to(args.device).requires_grad_(True)
-        # self.edge_index = torch.empty((2, 0), dtype=torch.long, device=args.device)
         self.edge_index = torch.stack([torch.arange(len(self)), torch.arange(len(self))], dim=0)
         self.graph_encoder_lr = torch.tensor(args.graph_encoder_lr).to(args.device).requires_grad_(True)
         self.text_encoder_lr = torch.tensor(args.text_encoder_lr).to(args.device).requires_grad_(True)
