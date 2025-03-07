@@ -36,8 +36,8 @@ def main(args):
         best_acc = 0
         for epoch in range(args.num_epoch_train):
             epoch_train(model=eval_model, optimizer=eval_optimizer, train_dataset=syn_dataset, args=args,
-                        is_distill=True)
-            acc = epoch_test(model=eval_model, test_dataset=graph_dataset, args=args, is_distill=True)
+                        is_distill=args.is_distill)
+            acc = epoch_test(model=eval_model, test_dataset=graph_dataset, args=args, is_distill=args.is_distill)
             if acc > best_acc:
                 best_acc = acc
         acc_list.append(best_acc)
@@ -51,11 +51,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="computer")
+    parser.add_argument("--dataset_name", type=str, default="art")
     parser.add_argument("--gpu", type=int, default=1)
-    parser.add_argument("--seed", type=int, default=44)
-    parser.add_argument("--it", type=int, default=5000)
-    parser.add_argument("--syn_size", type=int, default=100)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--it", type=int, default=0)
+    parser.add_argument("--syn_size", type=int, default=1000)
     parser.add_argument("--syn_num_summary", type=int, default=4)
     parser.add_argument("--syn_ratio_summary", type=float, default=60.0)
     parser.add_argument("--syn_lr", type=float, default=100)
@@ -66,7 +66,7 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size_train", type=int, default=32)
     parser.add_argument("--batch_size_test", type=int, default=512)
     parser.add_argument("--num_epoch_train", type=int, default=15)
-    parser.add_argument("--eval_time", type=int, default=1)
+    parser.add_argument("--eval_time", type=int, default=5)
 
     # graph encoder
     parser.add_argument("--graph_encoder", type=str, default="gcn")
@@ -87,6 +87,8 @@ if __name__ == '__main__':
 
     if args.dataset_name == "art":
         args.sample_size = [10, 10]
+    elif args.dataset_name == "products":
+        args.sample_size = [10, 5]
     else:
         args.sample_size = [-1, -1]
 

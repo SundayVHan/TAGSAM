@@ -48,8 +48,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="art")
-    parser.add_argument("--num_epoch_train", type=int, default=15)
+    parser.add_argument("--dataset_name", type=str, default="products")
+    parser.add_argument("--num_epoch_train", type=int, default=3)
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--batch_size_train", type=int, default=1024)
     parser.add_argument("--batch_size_test", type=int, default=1024)
@@ -73,6 +73,8 @@ if __name__ == "__main__":
 
     if args.dataset_name == "art":
         args.sample_size = [10, 10]
+    elif args.dataset_name == "products":
+        args.sample_size = [10, 5]
     else:
         args.sample_size = [-1, -1]
 

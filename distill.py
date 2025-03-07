@@ -68,20 +68,22 @@ async def main(args):
     expert_model.eval()
 
     save_it_pool = np.arange(0, args.syn_iteration+1, args.save_interval).tolist()
+    print(save_it_pool)
+    exit()
     match_loss = wBCELoss()
     match_sampler = NeighborSampler(graph_dataset.edge_index, node_idx=torch.arange(len(graph_dataset)),
                                     sizes=args.sample_size, batch_size=args.syn_match,
                                     shuffle=True, num_workers=8)
 
-    graph_syn, text_syn, selected_text = select_text(graph_dataset, args)
-    syn_dataset = SynGraphDataset(graph_syn, text_syn, args)
-
     expert_acc = epoch_test(model=expert_model, test_dataset=graph_dataset, args=args)
     print(f"Expert Acc: {expert_acc}")
 
+    graph_syn, text_syn, selected_text = select_text(graph_dataset, args)
+    syn_dataset = SynGraphDataset(graph_syn, text_syn, args)
+
     eval_threads = []
 
-    for it in tqdm(range(args.syn_iteration), desc="distill", position=0, leave=True):
+    for it in tqdm(range(args.syn_iteration+1), desc="distill", position=0, leave=True):
         if it in save_it_pool:
             # save synthetic data
             save_data = {
@@ -144,8 +146,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="art")
-    parser.add_argument("--gpu", type=int, default=1)
+    parser.add_argument("--dataset_name", type=str, default="photo")
+    parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save_interval", type=int, default=500)
 

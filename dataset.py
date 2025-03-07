@@ -3,6 +3,7 @@ import pickle
 
 import numpy as np
 import torch
+from torch_geometric.loader import NeighborSampler
 from tqdm import tqdm
 
 from model import TextEncoder
@@ -28,6 +29,9 @@ class GraphDataset:
         self.test_samples = None
         self.test_split()
 
+        self.tasks = None
+        self.process_subgraph()
+
     def __len__(self):
         return len(self.node_f)
 
@@ -44,7 +48,7 @@ class GraphDataset:
         print("Start to process text to embeddings...")
         all_text_embeds = []
         all_labels_embeds = []
-        batch_size = 512
+        batch_size = 64
         text_encoder = TextEncoder(self.args).to(self.args.device)
 
         for i in tqdm(range(0, len(self.text_list), batch_size)):
@@ -77,10 +81,6 @@ class GraphDataset:
     def test_split(self):
         filtered_labels = [label for label in self.all_labels if label != "nan"]
         filtered_labels = np.array(filtered_labels)
-        if self.args.dataset_name == "art" or self.args.dataset_name == "industry":
-            np.random.seed(0)
-            filtered_labels = filtered_labels[np.random.permutation(len(filtered_labels))]
-            np.random.seed(self.args.seed)
         num_labels = len(filtered_labels)
         n_way = 5
         num_groups = num_labels // n_way
@@ -108,10 +108,41 @@ class GraphDataset:
         self.test_labels = labels
         self.test_samples = samples
 
-    def get_test_labels_samples(self):
-        return self.test_labels, self.test_samples
-    
-    
+    def process_subgraph(self):
+        cache_file = os.path.join(self.args.buffer_save_dir, f"cache_subgraph_{self.args.batch_size_test}.pt")
+        if os.path.exists(cache_file):
+            with open(cache_file, 'rb') as f:
+                cache_data = pickle.load(f)
+                self.tasks = cache_data.get('tasks')
+                return
+
+        print("Start to process test subgraph...")
+
+        tasks = []
+
+        for labels_idx, samples_idx in tqdm(zip(self.test_labels, self.test_samples), total=len(self.test_labels)):
+            samples_idx = torch.tensor(samples_idx)
+            sampler = NeighborSampler(self.edge_index, node_idx=samples_idx,
+                                      sizes=self.args.sample_size, batch_size=self.args.batch_size_test,
+                                      shuffle=False, num_workers=16)
+
+            task = []
+            index = 0
+            for batch_size, n_id, adjs in sampler:
+                task.append((labels_idx, samples_idx[index: index + batch_size], batch_size, n_id, adjs))
+                index += batch_size
+
+            tasks.append(task)
+
+        self.tasks = tasks
+
+        cache_data = {
+            'tasks': self.tasks
+        }
+        with open(cache_file, 'wb') as f:
+            pickle.dump(cache_data, f)
+
+
 class SynGraphDataset(GraphDataset):
     def __init__(self, syn_graph, syn_text, args):
         self.args = args

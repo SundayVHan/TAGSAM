@@ -57,28 +57,22 @@ def epoch_test(
     label_list = test_dataset.label_list
     all_labels = test_dataset.all_labels
     all_labels_embeds = test_dataset.all_labels_embeds.to(args.device)
-    test_labels, test_samples = test_dataset.get_test_labels_samples()
 
     acc_list = []
-    for labels_idx, samples_idx in tqdm(zip(test_labels, test_samples), disable=is_distill):
-        ground_truth = label_list[samples_idx]
-        text_input = all_labels_embeds[labels_idx]
-        labels = all_labels[labels_idx]
-        samples_idx = torch.tensor(samples_idx)
+    for task in tqdm(test_dataset.tasks, disable=is_distill):
+        for labels_idx, samples_idx, batch_size, n_id, adjs in task:
+            ground_truth = label_list[samples_idx]
+            text_input = all_labels_embeds[labels_idx]
+            labels = all_labels[labels_idx]
 
-        sampler = NeighborSampler(test_dataset.edge_index, node_idx=samples_idx,
-                                       sizes=args.sample_size, batch_size=len(samples_idx),
-                                       shuffle=False, num_workers=8)
+            node_f = test_dataset.node_f[n_id].to(args.device)
+            adjs = [adj.to(args.device) for adj in adjs]
 
-        batch_size, n_id, adjs = next(iter(sampler))
-        node_f = test_dataset.node_f[n_id].to(args.device)
-        adjs = [adj.to(args.device) for adj in adjs]
-
-        logits = model(batch_size, node_f, adjs, text_input, is_eval=True)
-        pred = logits.argmax(dim=-1).cpu().numpy().reshape(-1)
-        y_pred = labels[pred]
-        acc = accuracy_score(ground_truth, y_pred)
-        acc_list.append(acc)
+            logits = model(batch_size, node_f, adjs, text_input, is_eval=True)
+            pred = logits.argmax(dim=-1).cpu().numpy().reshape(-1)
+            y_pred = labels[pred]
+            acc = accuracy_score(ground_truth, y_pred)
+            acc_list.append(acc)
 
     acc = np.mean(acc_list)
 
