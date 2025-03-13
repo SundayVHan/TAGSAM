@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import torch
 from sklearn.metrics import accuracy_score
@@ -22,7 +24,7 @@ def epoch_train(
 
     sampler = NeighborSampler(train_dataset.edge_index, node_idx=torch.arange(len(train_dataset)),
                                    sizes=args.sample_size, batch_size=args.batch_size_train,
-                                   shuffle=True, num_workers=8)
+                                   shuffle=True, num_workers=16)
 
     loss_sum, num_samples = 0, 0
     for i, (batch_size, n_id, adjs) in enumerate(tqdm(sampler, disable=is_distill)):
@@ -30,7 +32,7 @@ def epoch_train(
         adjs = [adj.to(args.device) for adj in adjs]
         text_embeds = train_dataset.text_embeds[n_id[:batch_size]].to(args.device)
 
-        loss, logits = model(batch_size, node_f, adjs, text_embeds)
+        loss, logits = model(node_f, adjs, text_embeds)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -39,7 +41,7 @@ def epoch_train(
         num_samples += batch_size
 
         if i % 10 == 0 and not is_distill:
-            print(f'Training Loss: {loss_sum / num_samples:.4f}')
+            tqdm.write(f'Training Loss: {loss_sum / num_samples:.4f}')
 
     return round(loss_sum / num_samples, 4)
 
@@ -60,22 +62,29 @@ def epoch_test(
 
     acc_list = []
     for task in tqdm(test_dataset.tasks, disable=is_distill):
-        for labels_idx, samples_idx, batch_size, n_id, adjs in task:
-            ground_truth = label_list[samples_idx]
+        acc_sum = 0.0
+        num_samples = 0
+        for labels_idx, batch_size, n_id, adjs in task:
+            ground_truth = label_list[n_id[:batch_size]]
+            if isinstance(ground_truth, str):
+                ground_truth = np.array([ground_truth])
             text_input = all_labels_embeds[labels_idx]
             labels = all_labels[labels_idx]
 
             node_f = test_dataset.node_f[n_id].to(args.device)
             adjs = [adj.to(args.device) for adj in adjs]
 
-            logits = model(batch_size, node_f, adjs, text_input, is_eval=True)
+            logits = model(node_f, adjs, text_input, is_eval=True)
             pred = logits.argmax(dim=-1).cpu().numpy().reshape(-1)
             y_pred = labels[pred]
             acc = accuracy_score(ground_truth, y_pred)
-            acc_list.append(acc)
+            acc_sum += acc * batch_size
+            num_samples += batch_size
+
+        acc = acc_sum / num_samples
+        acc_list.append(acc)
 
     acc = np.mean(acc_list)
-
     return round(acc, 4)
 
 
@@ -92,7 +101,7 @@ def epoch_train_manual(
 
     num_nodes = len(train_dataset)
     batch_size = args.syn_batch_size_train
-    num_batches = num_nodes // batch_size + 1
+    num_batches = math.ceil(num_nodes // batch_size)
     node_indices = torch.arange(num_nodes, device=args.device)
     node_indices = node_indices[torch.randperm(num_nodes)]
 
@@ -107,7 +116,7 @@ def epoch_train_manual(
         adjs = [adj.to(args.device) for adj in adjs]
         text_embeds = train_dataset.text_embeds[batch_idx].to(args.device)
 
-        loss, logits = model(batch_size, node_f, adjs, text_embeds, flat_param=param)
+        loss, logits = model(node_f, adjs, text_embeds, flat_param=param)
 
         graph_mask = model.get_params_mask_for_module("graph_encoder", param)
         text_mask = model.get_params_mask_for_module("text_encoder", param)

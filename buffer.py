@@ -4,6 +4,7 @@ from datetime import datetime
 
 import numpy as np
 import torch
+from tqdm import tqdm
 import wandb
 from torch_geometric import seed_everything
 
@@ -30,12 +31,12 @@ def main(args):
 
     best_acc = 0
     acc = epoch_test(model=expert_model, test_dataset=graph_dataset, args=args)
-    print(f"Init Acc: {acc}")
+    tqdm.write(f"Init Acc: {acc}")
     for e in range(args.num_epoch_train):
         epoch_train(model=expert_model, optimizer=optimizer, train_dataset=graph_dataset, args=args)
         acc = epoch_test(model=expert_model, test_dataset=graph_dataset, args=args)
         wandb.log({f"acc": acc}, step=e)
-        print(f"Epoch {e} Acc: {acc}")
+        tqdm.write(f"Epoch {e} Acc: {acc}")
 
         if acc > best_acc:
             best_acc = acc
@@ -48,12 +49,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="products")
+    parser.add_argument("--dataset_name", type=str, default="art")
     parser.add_argument("--num_epoch_train", type=int, default=3)
-    parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--gpu", type=int, default=3)
     parser.add_argument("--batch_size_train", type=int, default=1024)
-    parser.add_argument("--batch_size_test", type=int, default=1024)
-    parser.add_argument("--seed", type=int, default=43)
+    parser.add_argument("--batch_size_test", type=int, default=2048)
+    parser.add_argument("--seed", type=int, default=44)
 
     # graph encoder
     parser.add_argument("--graph_encoder", type=str, default="gcn")

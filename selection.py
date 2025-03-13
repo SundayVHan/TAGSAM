@@ -91,13 +91,11 @@ def get_npmi_matrix(model, sentences, method=1, batch_size=1):
                         temp[idx_i][idx_j] = (pxy - py) / (-1 * (pxy + px))
                         temp2[idx_i][idx_j] = (pxy - py)
                     except ZeroDivisionError:
-                        print("Zero division error ", idx_i, idx_j)
+                        # rint("Zero division error ", idx_i, idx_j)
                         temp[idx_i][idx_j] = -1
                         temp2[idx_i][idx_j] = -1
                     except:
                         print("Math Domain Error", i, j)
-                    if temp[idx_i][idx_j] > 1 or temp[idx_i][idx_j] < -1:
-                        print("Normalise assert ", temp[idx_i][idx_j], idx_i, idx_j)
                 batchCount = 0
                 batch = []
                 batch_indices = {}
@@ -111,10 +109,10 @@ def remove_unicode(text):
 @torch.no_grad()
 def select_text(dataset, args):
     select_idx = np.random.permutation(len(dataset))[:args.syn_size]
-    cache_file = os.path.join(str(args.buffer_save_dir), f"{args.name}_0.pt")
+    cache_file = os.path.join(str(args.buffer_save_dir), args.name, f"syn_data_0.pt")
 
     if os.path.exists(cache_file):
-        cache_data = torch.load(cache_file)
+        cache_data = torch.load(cache_file, weights_only=False, map_location="cpu")
         node_embeds = cache_data['node_f']
         text_embeds = cache_data['text_embeds']
         selected_text = cache_data['selected_text']
@@ -172,18 +170,18 @@ def select_text(dataset, args):
         normalised, matrix, surprise = get_npmi_matrix(model, all_sentences, batch_size=5)
         matrix[matrix < 0] = 0
 
-        n = matrix.shape[0]
-        for i in range(n):
-            for j in range(i + 1, n):
-                average = (matrix[i, j] + matrix[j, i]) / 2
-                matrix[i, j] = average
-                matrix[j, i] = average
+        # n = matrix.shape[0]
+        # for i in range(n):
+        #     for j in range(i + 1, n):
+        #         average = (matrix[i, j] + matrix[j, i]) / 2
+        #         matrix[i, j] = average
+        #         matrix[j, i] = average
 
         relevance = [sum(matrix[idx]) for idx in range(len(all_sentences))]
         penalty = [0 for _ in range(len(all_sentences))]
         selected = []
 
-        num_selected_sentences = int(len(all_sentences) * ratio)
+        num_selected_sentences = math.ceil(len(all_sentences) * ratio)
         for k in range(num_selected_sentences):
             maxIdx = -1
             maxVal = -float('inf')

@@ -11,7 +11,7 @@ from model import CLIP
 
 
 def main(args):
-    save_data = torch.load(os.path.join(str(args.buffer_save_dir), f"{args.name}_{args.it}.pt"))
+    save_data = torch.load(os.path.join(str(args.buffer_save_dir), args.name, f"syn_data_{args.it}.pt"), map_location=args.device)
     node_f = save_data["node_f"]
     text_embeds = save_data["text_embeds"]
     graph_encoder_lr = save_data["graph_encoder_lr"]
@@ -32,14 +32,18 @@ def main(args):
     ])
 
     acc_list = []
-    for _ in tqdm(range(args.eval_time), disable=args.is_distill):
+    for _ in range(args.eval_time):
         best_acc = 0
         for epoch in range(args.num_epoch_train):
             epoch_train(model=eval_model, optimizer=eval_optimizer, train_dataset=syn_dataset, args=args,
-                        is_distill=args.is_distill)
-            acc = epoch_test(model=eval_model, test_dataset=graph_dataset, args=args, is_distill=args.is_distill)
+                        is_distill=True)
+            acc = epoch_test(model=eval_model, test_dataset=graph_dataset, args=args, is_distill=True)
             if acc > best_acc:
                 best_acc = acc
+            if not args.is_distill:
+                print(f"Epoch: {epoch}, Acc: {acc:.4f}")
+        if not args.is_distill:
+            print(f"Best Acc: {best_acc:.4f}")
         acc_list.append(best_acc)
 
     acc = np.mean(acc_list)
@@ -51,11 +55,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="art")
+    parser.add_argument("--dataset_name", type=str, default="products")
     parser.add_argument("--gpu", type=int, default=1)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--it", type=int, default=0)
-    parser.add_argument("--syn_size", type=int, default=1000)
+    parser.add_argument("--seed", type=int, default=44)
+    parser.add_argument("--it", type=int, default=500)
+    parser.add_argument("--syn_size", type=int, default=500)
     parser.add_argument("--syn_num_summary", type=int, default=4)
     parser.add_argument("--syn_ratio_summary", type=float, default=60.0)
     parser.add_argument("--syn_lr", type=float, default=100)
@@ -64,9 +68,9 @@ if __name__ == '__main__':
 
     # eval
     parser.add_argument("--batch_size_train", type=int, default=32)
-    parser.add_argument("--batch_size_test", type=int, default=512)
+    parser.add_argument("--batch_size_test", type=int, default=4096)
     parser.add_argument("--num_epoch_train", type=int, default=15)
-    parser.add_argument("--eval_time", type=int, default=5)
+    parser.add_argument("--eval_time", type=int, default=1)
 
     # graph encoder
     parser.add_argument("--graph_encoder", type=str, default="gcn")

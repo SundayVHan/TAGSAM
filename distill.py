@@ -3,6 +3,7 @@ import os
 import random
 import subprocess
 import threading
+import time
 
 import numpy as np
 import torch
@@ -68,15 +69,14 @@ async def main(args):
     expert_model.eval()
 
     save_it_pool = np.arange(0, args.syn_iteration+1, args.save_interval).tolist()
-    print(save_it_pool)
-    exit()
+
     match_loss = wBCELoss()
     match_sampler = NeighborSampler(graph_dataset.edge_index, node_idx=torch.arange(len(graph_dataset)),
                                     sizes=args.sample_size, batch_size=args.syn_match,
                                     shuffle=True, num_workers=8)
 
-    expert_acc = epoch_test(model=expert_model, test_dataset=graph_dataset, args=args)
-    print(f"Expert Acc: {expert_acc}")
+    # expert_acc = epoch_test(model=expert_model, test_dataset=graph_dataset, args=args)
+    # tqdm.write(f"Expert Acc: {expert_acc}")
 
     graph_syn, text_syn, selected_text = select_text(graph_dataset, args)
     syn_dataset = SynGraphDataset(graph_syn, text_syn, args)
@@ -93,7 +93,7 @@ async def main(args):
                 "text_encoder_lr": syn_dataset.text_encoder_lr,
                 "selected_text": selected_text,
             }
-            torch.save(save_data, os.path.join(str(args.buffer_save_dir), f"{args.name}_{it}.pt"))
+            torch.save(save_data, os.path.join(str(args.buffer_save_dir), args.name, f"syn_data_{it}.pt"))
 
             # evaluate synthetic data
             if args.async_eval:
@@ -101,7 +101,7 @@ async def main(args):
                 eval_threads.append(eval_thread)
                 eval_thread.start()
 
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
         syn_dataset.set_train_model()
         syn_dataset.zero_grad()
 
@@ -121,14 +121,16 @@ async def main(args):
         match_adjs = [adj.to(args.device) for adj in match_adjs]
         match_text_embeds = graph_dataset.text_embeds[match_idx[:match_size]].to(args.device)
         with torch.no_grad():
-            expert_logits = expert_model(match_size, match_node_f, match_adjs, match_text_embeds, is_eval=True)
+            expert_logits = expert_model(match_node_f, match_adjs, match_text_embeds, is_eval=True)
 
-        student_logits = student_model(match_size, match_node_f, match_adjs, match_text_embeds, is_eval=True, flat_param=student_param)
+        student_logits = student_model(match_node_f, match_adjs, match_text_embeds, is_eval=True, flat_param=student_param)
 
         syn_loss = match_loss(student_logits, expert_logits)
 
         syn_dataset.compute_grad(syn_loss)
         syn_dataset.step()
+
+        tqdm.write(f"syn_loss: {syn_loss.item()}")
 
         wandb.log({
             "syn_loss": syn_loss.item(),
@@ -146,14 +148,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="photo")
-    parser.add_argument("--gpu", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--dataset_name", type=str, default="art")
+    parser.add_argument("--gpu", type=int, default=3)
+    parser.add_argument("--seed", type=int, default=44)
     parser.add_argument("--save_interval", type=int, default=500)
 
     # distill
     parser.add_argument("--syn_iteration", type=int, default=5000)
-    parser.add_argument("--syn_size", type=int, default=1000)
+    parser.add_argument("--syn_size", type=int, default=2000)
     parser.add_argument("--syn_lr", type=float, default=100)
     parser.add_argument("--syn_lr_lr", type=float, default=2e-6)
     parser.add_argument("--syn_loop", type=int, default=15)
@@ -165,6 +167,10 @@ if __name__ == "__main__":
     # eval
     parser.add_argument("--async_eval", type=bool, default=True)
     parser.add_argument("--eval_gpu", type=int, default=0)
+    parser.add_argument("--batch_size_train", type=int, default=32)
+    parser.add_argument("--batch_size_test", type=int, default=2048)
+    parser.add_argument("--num_epoch_train", type=int, default=15)
+    parser.add_argument("--eval_time", type=int, default=3)
 
     # graph encoder
     parser.add_argument("--graph_encoder", type=str, default="gcn")
@@ -180,11 +186,14 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args.device = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
-    args.buffer_save_dir = os.path.join("./buffer", args.dataset_name, args.graph_encoder, args.text_encoder)
     args.name = f"{args.dataset_name}-{args.syn_size}-{args.seed}-{args.syn_num_summary}-{args.syn_ratio_summary}"
+    args.buffer_save_dir = os.path.join("./buffer", args.dataset_name, args.graph_encoder, args.text_encoder)
+    os.makedirs(os.path.join(str(args.buffer_save_dir), args.name), exist_ok=True)
 
     if args.dataset_name == "art":
         args.sample_size = [10, 10]
+    elif args.dataset_name == "products":
+        args.sample_size = [10, 5]
     else:
         args.sample_size = [-1, -1]
 

@@ -13,10 +13,12 @@ class GCN(nn.Module):
         self.conv2 = GCNConv(hidden_dim, output_dim)
 
     def forward(self, x, adjs):
-        for i, adj in enumerate(adjs):
-            edge_index = adj.edge_index
-            x = self.conv1(x, edge_index) if i == 0 else self.conv2(x, edge_index)
-            x = F.leaky_relu(x)
+        edge_index, _, size = adjs[0]
+        x = self.conv1(x, edge_index)[:size[1]]
+        x = F.leaky_relu(x)
+
+        edge_index, _, size = adjs[1]
+        x = self.conv2(x, edge_index)[:size[1]]
         return x
 
 
@@ -86,30 +88,27 @@ class CLIP(nn.Module):
         self.text_encoder = TextProjection(args)
         self.graph_encoder = GraphEncoder(args)
 
-    def forward(self, batch_size, node_f, adjs, texts, is_eval=False, is_distill=False):
+    def forward(self, node_f, adjs, texts, is_eval=False):
         text_emb = self.encode_text(texts)
-        graph_emb = self.encode_graph(batch_size, node_f, adjs)
+        graph_emb = self.encode_graph(node_f, adjs)
 
         logits = np.exp(np.log(1 / 0.07)) * graph_emb @ text_emb.t()
 
         if is_eval:
-            if is_distill:
-                return logits, graph_emb, text_emb
-            else:
-                return logits
+            return logits
         else:
             ground_truth = torch.arange(len(logits)).type_as(logits).long()
             loss = (F.cross_entropy(logits, ground_truth) + F.cross_entropy(logits.t(), ground_truth)) / 2
             return loss, logits
 
-    def encode_graph(self, batch_size, node_f, edge_index):
-        graph_emb = self.graph_encoder(node_f, edge_index)[:batch_size]
-        graph_emb = graph_emb / graph_emb.norm(dim=1, keepdim=True)
+    def encode_graph(self, node_f, edge_index):
+        graph_emb = self.graph_encoder(node_f, edge_index)
+        graph_emb = graph_emb / (graph_emb.norm(dim=1, keepdim=True) + 1e-10)
         return graph_emb
 
     def encode_text(self, texts):
         text_emb = self.text_encoder(texts)
-        text_emb = text_emb / text_emb.norm(dim=1, keepdim=True)
+        text_emb = text_emb / (text_emb.norm(dim=1, keepdim=True) + 1e-10)
         return text_emb
 
 

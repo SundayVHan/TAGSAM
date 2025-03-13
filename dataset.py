@@ -13,7 +13,7 @@ class GraphDataset:
     def __init__(self, args):
         self.args = args
 
-        data = torch.load(f'./data/{args.dataset_name}.pt', weights_only=False)
+        data = torch.load(f'./data/{args.dataset_name}.pt', weights_only=False, map_location="cpu")
         self.node_f = data['node_f']
         self.edge_index = data['edge_index']
         self.text_list = data['text_list']
@@ -122,15 +122,18 @@ class GraphDataset:
 
         for labels_idx, samples_idx in tqdm(zip(self.test_labels, self.test_samples), total=len(self.test_labels)):
             samples_idx = torch.tensor(samples_idx)
-            sampler = NeighborSampler(self.edge_index, node_idx=samples_idx,
-                                      sizes=self.args.sample_size, batch_size=self.args.batch_size_test,
-                                      shuffle=False, num_workers=16)
+            if self.args.batch_size_test == -1:
+                sampler = NeighborSampler(self.edge_index, node_idx=samples_idx,
+                                          sizes=self.args.sample_size, batch_size=len(samples_idx),
+                                          shuffle=True, num_workers=16)
+            else:
+                sampler = NeighborSampler(self.edge_index, node_idx=samples_idx,
+                                          sizes=self.args.sample_size, batch_size=self.args.batch_size_test,
+                                          shuffle=True, num_workers=16)
 
             task = []
-            index = 0
             for batch_size, n_id, adjs in sampler:
-                task.append((labels_idx, samples_idx[index: index + batch_size], batch_size, n_id, adjs))
-                index += batch_size
+                task.append((labels_idx, batch_size, n_id, adjs))
 
             tasks.append(task)
 
