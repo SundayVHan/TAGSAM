@@ -24,15 +24,17 @@ def main(args):
 
     graph_dataset = GraphDataset(args)
 
-    eval_model = CLIP(args)
-
-    eval_optimizer = torch.optim.SGD([
-        {"params": eval_model.graph_encoder.parameters(), "lr": syn_dataset.graph_encoder_lr.item(), "momentum": 0.9, "weight_decay": 5e-4},
-        {"params": eval_model.text_encoder.parameters(), "lr": syn_dataset.text_encoder_lr.item(), "momentum": 0.9, "weight_decay": 5e-4},
-    ])
-
     acc_list = []
     for _ in range(args.eval_time):
+        eval_model = CLIP(args)
+
+        eval_optimizer = torch.optim.SGD([
+            {"params": eval_model.graph_encoder.parameters(), "lr": syn_dataset.graph_encoder_lr.item(),
+             "momentum": 0.9, "weight_decay": 5e-4},
+            {"params": eval_model.text_encoder.parameters(), "lr": syn_dataset.text_encoder_lr.item(), "momentum": 0.9,
+             "weight_decay": 5e-4},
+        ])
+
         best_acc = 0
         for epoch in range(args.num_epoch_train):
             epoch_train(model=eval_model, optimizer=eval_optimizer, train_dataset=syn_dataset, args=args,
@@ -56,15 +58,16 @@ if __name__ == '__main__':
 
     # base
     parser.add_argument("--dataset_name", type=str, default="products")
-    parser.add_argument("--gpu", type=int, default=1)
-    parser.add_argument("--seed", type=int, default=44)
-    parser.add_argument("--it", type=int, default=500)
-    parser.add_argument("--syn_size", type=int, default=500)
+    parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=45)
+    parser.add_argument("--it", type=int, default=5000)
+    parser.add_argument("--syn_size", type=int, default=2000)
     parser.add_argument("--syn_num_summary", type=int, default=4)
     parser.add_argument("--syn_ratio_summary", type=float, default=60.0)
     parser.add_argument("--syn_lr", type=float, default=100)
     parser.add_argument("--syn_lr_lr", type=float, default=2e-6)
     parser.add_argument("--is_distill", type=bool, default=False)
+    parser.add_argument("--run_name", type=str, default="")
 
     # eval
     parser.add_argument("--batch_size_train", type=int, default=32)
@@ -87,7 +90,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.device = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
     args.buffer_save_dir = os.path.join("./buffer", args.dataset_name, args.graph_encoder, args.text_encoder)
-    args.name = f"{args.dataset_name}-{args.syn_size}-{args.seed}-{args.syn_num_summary}-{args.syn_ratio_summary}"
+
+    if args.run_name:
+        args.name = args.run_name
+    else:
+        args.name = f"{args.dataset_name}-{args.syn_size}-{args.seed}-{args.syn_num_summary}-{args.syn_ratio_summary}"
 
     if args.dataset_name == "art":
         args.sample_size = [10, 10]
