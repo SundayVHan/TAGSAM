@@ -112,7 +112,7 @@ def select_text(dataset, args):
     cache_file = os.path.join(str(args.buffer_save_dir), args.name, f"syn_data_0.pt")
 
     if os.path.exists(cache_file):
-        cache_data = torch.load(cache_file, weights_only=False, map_location="cpu")
+        cache_data = torch.load(cache_file)
         node_embeds = cache_data['node_f']
         text_embeds = cache_data['text_embeds']
         selected_text = cache_data['selected_text']

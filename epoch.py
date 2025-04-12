@@ -20,9 +20,9 @@ def epoch_train(
         is_distill=False
 ):
     model.train()
-    model.to(args.device)
+    model=model.to(args.device)
 
-    sampler = NeighborSampler(train_dataset.edge_index, node_idx=torch.arange(len(train_dataset)),
+    sampler = NeighborSampler(train_dataset.edge_index,
                                    sizes=args.sample_size, batch_size=args.batch_size_train,
                                    shuffle=True, num_workers=16)
 
@@ -54,7 +54,7 @@ def epoch_test(
         is_distill=False
 ):
     model.eval()
-    model.to(args.device)
+    model=model.to(args.device)
 
     label_list = test_dataset.label_list
     all_labels = test_dataset.all_labels
@@ -97,7 +97,7 @@ def epoch_train_manual(
         args,
 ):
     model.train()
-    model.to(args.device)
+    model=model.to(args.device)
 
     num_nodes = len(train_dataset)
     batch_size = args.syn_batch_size_train
