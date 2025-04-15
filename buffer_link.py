@@ -1,56 +1,31 @@
 import os
 import random
-from datetime import datetime
-
 import numpy as np
 import torch
-from torch_geometric.loader import NeighborSampler
-from tqdm import tqdm
-import wandb
+from model import CLIP, LinkPredictor
 
+from epoch import epoch_train_link
 from dataset import GraphDataset
-from epoch import epoch_test, epoch_train
-from model import CLIP
+
 
 
 def main(args):
-    wandb.init(
-        project="TAGSAM-buffer",
-        name=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        config=args,
-    )
-
     graph_dataset = GraphDataset(args)
+
     expert_model = CLIP(args).to(args.device)
+    expert_state = torch.load(os.path.join(str(args.buffer_save_dir), f"expert_state.pt"), map_location=args.device, weights_only=True)
+    expert_model.load_state_dict(expert_state)
+    expert_model.eval()
 
-    optimizer = torch.optim.Adam([
-        {"params": expert_model.graph_encoder.parameters(), "lr": args.graph_encoder_lr},
-        {"params": expert_model.text_encoder.parameters(), "lr": args.text_encoder_lr},
-    ])
-    optimizer.zero_grad()
+    link_model = LinkPredictor(args.gnn_output_dim).to(args.device)
+    link_model.train()
 
-    sampler = NeighborSampler(
-        graph_dataset.edge_index,
-        sizes=args.sample_size,
-        batch_size=args.batch_size_train, 
-        shuffle=True, 
-        num_workers=16)
+    optimizer = torch.optim.Adam(link_model.parameters(), lr=args.link_lr, weight_decay=5e-4)
+    for epoch in range(args.num_epoch_train):
+        loss, train_auc = epoch_train_link(model=expert_model, decoder=link_model, dataset=graph_dataset, optimizer=optimizer, args=args)
+        print(f"Link Train Epoch: {epoch}, Loss: {loss:.4f}, AUC: {train_auc:.4f}")
 
-    best_val = 0
-    best_acc = 0
-    val_acc, test_acc = epoch_test(model=expert_model, dataset=graph_dataset, args=args)
-    tqdm.write(f"Init Acc: {test_acc}")
-    for e in range(args.num_epoch_train):
-        epoch_train(model=expert_model, optimizer=optimizer, dataset=graph_dataset, sampler=sampler, args=args)
-        val_acc, test_acc = epoch_test(model=expert_model, dataset=graph_dataset, args=args)
-        wandb.log({f"val_acc": val_acc, "test_acc": test_acc}, step=e)
-        tqdm.write(f"Epoch {e} Val Acc: {val_acc} Test Acc: {test_acc}")
-
-        if val_acc > best_val:
-            best_val = val_acc
-            best_acc = test_acc
-            torch.save(expert_model.state_dict(), os.path.join(args.buffer_save_dir, f"expert_state.pt"))
-    tqdm.write(f"Best Val Acc: {best_val} Best Test Acc: {best_acc}")
+    torch.save(link_model.state_dict(), os.path.join(str(args.buffer_save_dir), f"link_model.pt"))
 
 if __name__ == "__main__":
     import argparse
@@ -58,12 +33,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
+    parser.add_argument("--link_lr", type=float, default=5e-3)
+
+    # base
     parser.add_argument("--dataset_name", type=str, default="photo")
-    parser.add_argument("--num_epoch_train", type=int, default=15)
-    parser.add_argument("--gpu", type=int, default=1)
+    parser.add_argument("--num_epoch_train", type=int, default=60)
+    parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--batch_size_train", type=int, default=1024)
     parser.add_argument("--batch_size_test", type=int, default=2048)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=44)
 
     # graph encoder
     parser.add_argument("--graph_encoder", type=str, default="gcn")
@@ -90,7 +68,6 @@ if __name__ == "__main__":
 
     os.makedirs(args.buffer_save_dir, exist_ok=True)
 
-
     def seed_everything(seed=42):
         random.seed(seed)
         np.random.seed(seed)
@@ -103,5 +80,3 @@ if __name__ == "__main__":
 
     seed_everything(args.seed)
     main(args)
-
-

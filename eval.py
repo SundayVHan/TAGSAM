@@ -1,55 +1,59 @@
 import os
+import random
 
 import numpy as np
 import torch
+from torch_geometric.loader import NeighborSampler
 from tqdm import tqdm
 
-from buffer import seed_everything
 from dataset import SynGraphDataset, GraphDataset
 from epoch import epoch_train, epoch_test
 from model import CLIP
 
-
-def main(args):
-    save_data = torch.load(os.path.join(str(args.buffer_save_dir), args.name, f"syn_data_{args.it}.pt"), map_location=args.device)
-    node_f = save_data["node_f"]
-    text_embeds = save_data["text_embeds"]
-    graph_encoder_lr = save_data["graph_encoder_lr"]
-    text_encoder_lr = save_data["text_encoder_lr"]
-
-    syn_dataset = SynGraphDataset(node_f, text_embeds, args)
-    syn_dataset.graph_encoder_lr = graph_encoder_lr
-    syn_dataset.text_encoder_lr = text_encoder_lr
+def eval_syn(
+    graph_dataset: GraphDataset,
+    syn_dataset: SynGraphDataset,
+    args,
+    is_distill=False
+):
     syn_dataset.set_eval_model()
 
-    graph_dataset = GraphDataset(args)
+    sampler = NeighborSampler(
+        syn_dataset.edge_index,
+        sizes=[-1, -1],
+        batch_size=args.batch_size_train,
+        shuffle=True,
+    )
 
-    acc_list = []
-    for _ in range(args.eval_time):
+    best_val_list = []
+    best_acc_list = []
+    for _ in tqdm(range(args.eval_time), desc="eval"):
         eval_model = CLIP(args)
 
-        eval_optimizer = torch.optim.SGD([
-            {"params": eval_model.graph_encoder.parameters(), "lr": syn_dataset.graph_encoder_lr.item(),
-             "momentum": 0.9, "weight_decay": 5e-4},
-            {"params": eval_model.text_encoder.parameters(), "lr": syn_dataset.text_encoder_lr.item(), "momentum": 0.9,
-             "weight_decay": 5e-4},
+        optimizer = torch.optim.SGD([
+            {"params": eval_model.graph_encoder.parameters(), "lr": syn_dataset.graph_encoder_lr.item(),  "momentum": 0.9, "weight_decay": 5e-4},
+            {"params": eval_model.text_encoder.parameters(), "lr": syn_dataset.text_encoder_lr.item(), "momentum": 0.9, "weight_decay": 5e-4},
         ])
+        optimizer.zero_grad()
 
+        best_val = 0
         best_acc = 0
         for epoch in range(args.num_epoch_train):
-            epoch_train(model=eval_model, optimizer=eval_optimizer, train_dataset=syn_dataset, args=args,
-                        is_distill=True)
-            acc = epoch_test(model=eval_model, test_dataset=graph_dataset, args=args, is_distill=True)
-            if acc > best_acc:
-                best_acc = acc
-            if not args.is_distill:
-                print(f"Epoch: {epoch}, Acc: {acc:.4f}")
-        if not args.is_distill:
-            print(f"Best Acc: {best_acc:.4f}")
-        acc_list.append(best_acc)
+            epoch_train(model=eval_model, optimizer=optimizer, dataset=syn_dataset, sampler=sampler, args=args, is_distill=is_distill)
+            val_acc, test_acc = epoch_test(model=eval_model, dataset=graph_dataset, args=args, is_distill=is_distill)
+            print(f"Epoch {epoch}: Val Acc: {val_acc:.4f}, Test Acc: {test_acc:.4f}")
 
-    acc = np.mean(acc_list)
-    print(f"Accuracy: {acc:.4f}")
+            if val_acc > best_val:
+                best_val = val_acc
+                best_acc = test_acc
+
+        best_val_list.append(best_val)
+        best_acc_list.append(best_acc)
+
+    mean_val = np.mean(best_val_list)
+    mean_acc = np.mean(best_acc_list)
+    tqdm.write(f"Mean Val Acc: {mean_val}, Mean Test Acc: {mean_acc}")
+    return mean_val, mean_acc
 
 if __name__ == '__main__':
     import argparse
@@ -57,11 +61,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="products")
+    parser.add_argument("--dataset_name", type=str, default="computer")
     parser.add_argument("--gpu", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=45)
-    parser.add_argument("--it", type=int, default=5000)
-    parser.add_argument("--syn_size", type=int, default=2000)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--it", type=int, default=0)
+    parser.add_argument("--syn_size", type=int, default=200)
     parser.add_argument("--syn_num_summary", type=int, default=4)
     parser.add_argument("--syn_ratio_summary", type=float, default=60.0)
     parser.add_argument("--syn_lr", type=float, default=100)
@@ -103,5 +107,19 @@ if __name__ == '__main__':
     else:
         args.sample_size = [-1, -1]
 
+    def seed_everything(seed=42):
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     seed_everything(args.seed)
-    main(args)
+    
+    syn_dataset = SynGraphDataset(args)
+    syn_dataset.load(args.it)
+    graph_dataset = GraphDataset(args)
+    eval_syn(graph_dataset, syn_dataset, args)

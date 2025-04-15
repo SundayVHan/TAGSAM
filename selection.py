@@ -112,11 +112,11 @@ def select_text(dataset, args):
     cache_file = os.path.join(str(args.buffer_save_dir), args.name, f"syn_data_0.pt")
 
     if os.path.exists(cache_file):
-        cache_data = torch.load(cache_file)
+        cache_data = torch.load(cache_file, map_location=args.device)
+        print(cache_data.keys())
         node_embeds = cache_data['node_f']
         text_embeds = cache_data['text_embeds']
-        selected_text = cache_data['selected_text']
-        return node_embeds, text_embeds, selected_text
+        return node_embeds, text_embeds
 
     selected_text = []
     feature_aggregate =[]
@@ -227,4 +227,4 @@ def select_text(dataset, args):
     text_embeds = torch.cat(text_embeds, dim=0)
     node_embeds = torch.stack(feature_aggregate)
 
-    return node_embeds, text_embeds, selected_text
+    return node_embeds, text_embeds

@@ -1,66 +1,26 @@
-import asyncio
 import os
 import random
-import subprocess
-import threading
-import time
 
 import numpy as np
 import torch
-from torch_geometric import seed_everything
 from torch_geometric.loader import NeighborSampler
 from tqdm import tqdm
 
 import wandb
 from dataset import GraphDataset, SynGraphDataset
 from epoch import epoch_test, epoch_train_manual
-from model import CLIP, wBCELoss
+from model import CLIP, wBCELoss, LinkPredictor
 from reparam import ReparamModule
 from selection import select_text
+from eval import eval_syn
 
-
-def async_eval(it, wandb, args):
-    eval_args = [
-        "--dataset_name", args.dataset_name,
-        "--gpu", str(args.eval_gpu),
-        "--seed", str(args.seed),
-        "--it", str(it),
-        "--syn_size", str(args.syn_size),
-        "--syn_num_summary", str(args.syn_num_summary),
-        "--syn_ratio_summary", str(args.syn_ratio_summary),
-        "--is_distill", "True",
-    ]
-
-    process = subprocess.Popen(
-        ["python", "eval.py"] + eval_args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-
-    stdout, stderr = process.communicate()
-    stdout_str = stdout.decode()
-    if "Accuracy:" in stdout_str:
-        acc = float(stdout_str.split("Accuracy:")[1].strip().split()[0])
-    else:
-        acc = 0.0
-
-    wandb.log({
-        "eval_acc": acc,
-        "iteration": it
-    })
-    return acc
-
-
-async def main(args):
+def main(args):
     wandb.init(
-        project="TAGSAM-distill",
+        project="TAGSAM",
+        group="distill",
         name=args.name,
         config=args,
     )
-    wandb.define_metric("iteration")
-    wandb.define_metric("syn_loss", step_metric="iteration")
-    wandb.define_metric("eval_acc", step_metric="iteration")
-
     graph_dataset = GraphDataset(args)
 
     expert_model = CLIP(args).to(args.device)
@@ -71,35 +31,68 @@ async def main(args):
     save_it_pool = np.arange(0, args.syn_iteration+1, args.save_interval).tolist()
 
     match_loss = wBCELoss()
-    match_sampler = NeighborSampler(graph_dataset.edge_index, node_idx=torch.arange(len(graph_dataset)),
-                                    sizes=args.sample_size, batch_size=args.syn_match,
-                                    shuffle=True, num_workers=8)
+    match_sampler = NeighborSampler(
+        graph_dataset.edge_index,
+        node_idx=torch.arange(len(graph_dataset)),
+        sizes=args.sample_size, 
+        batch_size=args.syn_match,
+        shuffle=True, 
+        num_workers=0
+    )
 
-    # expert_acc = epoch_test(model=expert_model, test_dataset=graph_dataset, args=args)
-    # tqdm.write(f"Expert Acc: {expert_acc}")
+    _, expert_acc = epoch_test(model=expert_model, dataset=graph_dataset, args=args)
+    tqdm.write(f"Expert Acc: {expert_acc}")
+    wandb.summary["expert_acc"] = expert_acc
 
-    graph_syn, text_syn, selected_text = select_text(graph_dataset, args)
-    syn_dataset = SynGraphDataset(graph_syn, text_syn, args)
+    graph_syn, text_syn = select_text(graph_dataset, args)
 
-    eval_threads = []
+    link_model = LinkPredictor(args.gnn_hidden_dim).to(args.device)
+    link_model.load_state_dict(torch.load(os.path.join(str(args.buffer_save_dir), f"link_model.pt"), map_location=args.device))
+    link_model.eval()
+    
+    with torch.no_grad():
+        syn_text_embeds = expert_model.text_encoder(text_syn)
+    
+        num_nodes = len(text_syn)
+        indices = torch.triu_indices(num_nodes, num_nodes, offset=1, device=args.device)
+        src_nodes, dst_nodes = indices[0], indices[1]
+    
+        pred = link_model(syn_text_embeds[src_nodes], syn_text_embeds[dst_nodes])
+    
+        mask = pred > 1 - 3e-8
+        edge_index_upper = torch.stack([src_nodes[mask], dst_nodes[mask]], dim=0)
+        edge_index_lower = torch.stack([edge_index_upper[1], edge_index_upper[0]], dim=0)
+        self_loops = torch.arange(num_nodes, device=args.device)
+        self_loops = torch.stack([self_loops, self_loops], dim=0)
+    
+        syn_edge_index = torch.cat([edge_index_upper, edge_index_lower, self_loops], dim=1)
+        tqdm.write(f"Generated {syn_edge_index.size(1)} edges for {num_nodes} nodes")
+        
+    syn_dataset = SynGraphDataset(args)
+    syn_dataset.init(graph_syn, text_syn, syn_edge_index)
 
+    inner_sampler = NeighborSampler(
+        syn_dataset.edge_index,
+        sizes=[-1, -1],
+        num_nodes=len(syn_dataset),
+        num_workers=0,
+        shuffle=True,
+        batch_size=args.syn_batch_size_train,
+    )
+
+    best_val = 0
+    best_acc = 0
     for it in tqdm(range(args.syn_iteration+1), desc="distill", position=0, leave=True):
         if it in save_it_pool:
-            # save synthetic data
-            save_data = {
-                "node_f": syn_dataset.node_f,
-                "text_embeds": syn_dataset.text_embeds,
-                "graph_encoder_lr": syn_dataset.graph_encoder_lr,
-                "text_encoder_lr": syn_dataset.text_encoder_lr,
-                "selected_text": selected_text,
-            }
-            torch.save(save_data, os.path.join(str(args.buffer_save_dir), args.name, f"syn_data_{it}.pt"))
-
-            # evaluate synthetic data
-            if args.async_eval:
-                eval_thread = threading.Thread(target=async_eval, args=(it, wandb, args))
-                eval_threads.append(eval_thread)
-                eval_thread.start()
+            syn_dataset.save(it)
+            mean_val, mean_acc = eval_syn(graph_dataset, syn_dataset, args, is_distill=True)
+            if mean_val > best_val:
+                best_val = mean_val
+                best_acc = mean_acc
+            wandb.log({
+                "val": mean_val,
+                "acc": mean_acc,
+            })
 
         # torch.cuda.empty_cache()
         syn_dataset.set_train_model()
@@ -109,12 +102,15 @@ async def main(args):
         student_param = torch.cat([p.detach().reshape(-1) for p in student_model.parameters()], dim=0).requires_grad_(True)
 
         for step in range(args.syn_loop):
-            loss, student_param = epoch_train_manual(model=student_model,
-                                      param=student_param,
-                                      graph_encoder_lr=syn_dataset.graph_encoder_lr,
-                                      text_encoder_lr=syn_dataset.text_encoder_lr,
-                                      train_dataset=syn_dataset,
-                                      args=args)
+            _, student_param = epoch_train_manual(
+                model=student_model,
+                param=student_param,
+                dataset=syn_dataset,
+                sampler=inner_sampler,
+                graph_encoder_lr=syn_dataset.graph_encoder_lr,
+                text_encoder_lr=syn_dataset.text_encoder_lr,
+                args=args
+            )
 
         match_size, match_idx, match_adjs = next(iter(match_sampler))
         match_node_f = graph_dataset.node_f[match_idx].to(args.device)
@@ -130,15 +126,16 @@ async def main(args):
         syn_dataset.compute_grad(syn_loss)
         syn_dataset.step()
 
-        tqdm.write(f"syn_loss: {syn_loss.item()}")
+        if it % 10 == 0:
+            tqdm.write(f"syn_loss: {syn_loss.item()}")
 
         wandb.log({
-            "syn_loss": syn_loss.item(),
-            "iteration": it,
+            "loss": syn_loss.item(),
         })
 
-    for eval_thread in eval_threads:
-        eval_thread.join()
+    tqdm.write(f"Best Val: {best_val}, Best Acc: {best_acc}")
+    wandb.summary["best_val"] = best_val
+    wandb.summary["best_acc"] = best_acc
     wandb.finish()
 
 
@@ -148,26 +145,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # base
-    parser.add_argument("--dataset_name", type=str, default="art")
-    parser.add_argument("--gpu", type=int, default=3)
+    parser.add_argument("--dataset_name", type=str, default="computer")
+    parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--seed", type=int, default=44)
-    parser.add_argument("--save_interval", type=int, default=500)
 
     # distill
     parser.add_argument("--syn_iteration", type=int, default=5000)
-    parser.add_argument("--syn_size", type=int, default=2000)
-    parser.add_argument("--syn_lr", type=float, default=100)
-    parser.add_argument("--syn_lr_lr", type=float, default=2e-6)
+    parser.add_argument("--syn_size", type=int, default=200)
+    parser.add_argument("--syn_lr", type=float, default=2000)
+    parser.add_argument("--syn_lr_lr", type=float, default=2e-5)
     parser.add_argument("--syn_loop", type=int, default=15)
     parser.add_argument("--syn_batch_size_train", type=int, default=20)
     parser.add_argument("--syn_match", type=int, default=2000)
     parser.add_argument("--syn_num_summary", type=int, default=4)
     parser.add_argument("--syn_ratio_summary", type=float, default=60.0)
+    parser.add_argument("--save_interval", type=int, default=500)
 
     # eval
-    parser.add_argument("--async_eval", type=bool, default=True)
-    parser.add_argument("--eval_gpu", type=int, default=0)
-    parser.add_argument("--batch_size_train", type=int, default=32)
+    parser.add_argument("--batch_size_train", type=int, default=20)
     parser.add_argument("--batch_size_test", type=int, default=2048)
     parser.add_argument("--num_epoch_train", type=int, default=15)
     parser.add_argument("--eval_time", type=int, default=3)
@@ -197,17 +192,16 @@ if __name__ == "__main__":
     else:
         args.sample_size = [-1, -1]
 
-    seed_everything(args.seed)
-    asyncio.run(main(args))
-
-
-def seed_everything(seed=42):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    def seed_everything(seed=42):
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+    seed_everything(args.seed)
+    main(args)
 

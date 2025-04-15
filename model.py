@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv
+from torch_geometric.nn import GCNConv, SGConv
 from transformers import BertModel, BertTokenizer, GPT2Tokenizer, GPT2LMHeadModel
 
 
@@ -13,6 +13,12 @@ class GCN(nn.Module):
         self.conv2 = GCNConv(hidden_dim, output_dim)
 
     def forward(self, x, adjs):
+        if isinstance(adjs, torch.Tensor):
+            x = self.conv1(x, adjs)
+            x = F.leaky_relu(x)
+            x = self.conv2(x, adjs)
+            return x
+
         edge_index, _, size = adjs[0]
         x = self.conv1(x, edge_index)[:size[1]]
         x = F.leaky_relu(x)
@@ -88,9 +94,12 @@ class CLIP(nn.Module):
         self.text_encoder = TextProjection(args)
         self.graph_encoder = GraphEncoder(args)
 
-    def forward(self, node_f, adjs, texts, is_eval=False):
+    def forward(self, node_f, adjs, texts, is_eval=False, batch_idx=None):
         text_emb = self.encode_text(texts)
         graph_emb = self.encode_graph(node_f, adjs)
+
+        if batch_idx is not None:
+            graph_emb = graph_emb[batch_idx]
 
         logits = np.exp(np.log(1 / 0.07)) * graph_emb @ text_emb.t()
 
@@ -117,22 +126,36 @@ class wBCELoss(nn.Module):
         super(wBCELoss, self).__init__()
 
     def forward(self, logits, gt_matrix):
-        gt_matrix = gt_matrix.to(logits.device)
-        probs1 = torch.sigmoid(logits)
-        probs2 = torch.sigmoid(gt_matrix)
+        probs_row = F.softmax(logits, dim=1)
+        gt_row = F.softmax(gt_matrix, dim=1)  # for soft alignment
 
-        loss_matrix = - probs2 * torch.log(probs1 + 1e-6) - (1 - probs2) * torch.log(1 - probs1 + 1e-6)
+        loss_row = F.binary_cross_entropy(probs_row, gt_row)
 
-        pos_mask = (probs2 > 0.5).detach()
-        neg_mask = ~pos_mask
+        # Column-wise softmax (across rows)
+        probs_col = F.softmax(logits, dim=0)
+        gt_col = F.softmax(gt_matrix, dim=0)
 
-        loss_pos = torch.where(pos_mask, loss_matrix, torch.tensor(0.0, device=probs1.device)).sum()
-        loss_neg = torch.where(neg_mask, loss_matrix, torch.tensor(0.0, device=probs1.device)).sum()
+        loss_col = F.binary_cross_entropy(probs_col, gt_col)
 
-        loss_pos /= (pos_mask.sum() + 1e-6)
-        loss_neg /= (neg_mask.sum() + 1e-6)
+        # Average both directions
+        return 0.5 * (loss_row + loss_col)
 
-        return (loss_pos + loss_neg) / 2
+        # gt_matrix = gt_matrix.to(logits.device)
+        # probs1 = torch.sigmoid(logits)
+        # probs2 = torch.sigmoid(gt_matrix)
+        
+        # loss_matrix = - probs2 * torch.log(probs1 + 1e-6) - (1 - probs2) * torch.log(1 - probs1 + 1e-6)
+        
+        # pos_mask = (probs2 > 0.5).detach()
+        # neg_mask = ~pos_mask
+        
+        # loss_pos = torch.where(pos_mask, loss_matrix, torch.tensor(0.0, device=probs1.device)).sum()
+        # loss_neg = torch.where(neg_mask, loss_matrix, torch.tensor(0.0, device=probs1.device)).sum()
+        
+        # loss_pos /= (pos_mask.sum() + 1e-6)
+        # loss_neg /= (neg_mask.sum() + 1e-6)
+        
+        # return (loss_pos + loss_neg) / 2
 
 
 class GPT2:
@@ -145,8 +168,8 @@ class GPT2:
             self.model = GPT2LMHeadModel.from_pretrained(location)
         self.device = torch.device(device)
         self.model.eval()
-        self.start_tok = "<|endoftext|>"
-        self.model.to(self.device)
+        self.model = self.model.to(self.device)
+        self.start_tok = " "
 
     def pad(self, context, max_length=1024):
         for i in range(len(context)):
@@ -222,3 +245,23 @@ class GPT2:
         #    token = '\u010A' + token
         # print(token)
         return token
+
+
+class LinkPredictor(nn.Module):
+    def __init__(self, input_dim, hidden_dim=384):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(input_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+    def forward(self, x1, x2):
+        # 为了保证x1和x2交换位置后结果一致，对两种拼接方式取平均
+        x_12 = torch.cat([x1, x2], dim=-1)  # [batch, input_dim*2]
+        x_21 = torch.cat([x2, x1], dim=-1)  # [batch, input_dim*2]
+        
+        pred_12 = torch.sigmoid(self.mlp(x_12)).squeeze(-1)
+        pred_21 = torch.sigmoid(self.mlp(x_21)).squeeze(-1)
+        
+        return (pred_12 + pred_21) / 2
