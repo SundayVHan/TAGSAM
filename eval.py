@@ -27,7 +27,7 @@ def eval_syn(
 
     best_val_list = []
     best_acc_list = []
-    for _ in tqdm(range(args.eval_time), desc="eval"):
+    for _ in tqdm(range(args.eval_time), desc="eval", position=1, leave=False):
         eval_model = CLIP(args)
 
         optimizer = torch.optim.SGD([
@@ -41,7 +41,9 @@ def eval_syn(
         for epoch in range(args.num_epoch_train):
             epoch_train(model=eval_model, optimizer=optimizer, dataset=syn_dataset, sampler=sampler, args=args, is_distill=is_distill)
             val_acc, test_acc = epoch_test(model=eval_model, dataset=graph_dataset, args=args, is_distill=is_distill)
-            print(f"Epoch {epoch}: Val Acc: {val_acc:.4f}, Test Acc: {test_acc:.4f}")
+
+            if not is_distill:
+                print(f"Epoch {epoch}: Val Acc: {val_acc:.4f}, Test Acc: {test_acc:.4f}")   
 
             if val_acc > best_val:
                 best_val = val_acc

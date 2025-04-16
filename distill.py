@@ -58,9 +58,12 @@ def main(args):
         src_nodes, dst_nodes = indices[0], indices[1]
     
         pred = link_model(syn_text_embeds[src_nodes], syn_text_embeds[dst_nodes])
-    
-        mask = pred > 1 - 3e-8
-        edge_index_upper = torch.stack([src_nodes[mask], dst_nodes[mask]], dim=0)
+        
+        num_edges = min(num_nodes * 3, len(pred))  
+        # 选择预测值最大的 k 条边
+        topk_values, topk_indices = torch.topk(pred, num_edges)
+        
+        edge_index_upper = torch.stack([src_nodes[topk_indices], dst_nodes[topk_indices]], dim=0)
         edge_index_lower = torch.stack([edge_index_upper[1], edge_index_upper[0]], dim=0)
         self_loops = torch.arange(num_nodes, device=args.device)
         self_loops = torch.stack([self_loops, self_loops], dim=0)
