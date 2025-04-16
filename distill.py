@@ -39,7 +39,7 @@ def main(args):
     link_model.eval()
     
     syn_text_embeds = expert_model.text_encoder(text_syn)
-    syn_edge_index = link_model.inference(syn_text_embeds)
+    syn_edge_index = link_model.inference(syn_text_embeds, args)
     tqdm.write(f"Generated {syn_edge_index.size(1)} edges for {len(text_syn)} nodes")
     del link_model    
     

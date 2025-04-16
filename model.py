@@ -266,10 +266,8 @@ class LinkPredictor(nn.Module):
         
         return (pred_12 + pred_21) / 2
 
-    def inference(self, syn_text_embeds):
+    def inference(self, syn_text_embeds, args):
         with torch.no_grad():
-            args = self.args
-
             num_nodes = len(syn_text_embeds)
             indices = torch.triu_indices(num_nodes, num_nodes, offset=1, device=args.device)
             src_nodes, dst_nodes = indices[0], indices[1]
