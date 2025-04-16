@@ -221,11 +221,11 @@ class SynGraphDataset(GraphDataset):
 
     def load(self, it):
         save_data = torch.load(os.path.join(str(self.args.buffer_save_dir), self.args.name, f"syn_data_{it}.pt"), map_location="cpu")
-        self.node_f = save_data["node_f"].to(self.args.device).requires_grad_(True)
-        self.text_embeds = save_data["text_embeds"].to(self.args.device).requires_grad_(False)
-        self.graph_encoder_lr = save_data["graph_encoder_lr"].to(self.args.device).requires_grad_(True)
-        self.text_encoder_lr = save_data["text_encoder_lr"].to(self.args.device).requires_grad_(True)
-        self.edge_index = save_data["edge_index"].to(self.args.device).requires_grad_(False)
+        self.node_f = save_data["node_f"].to(self.args.device).detach().requires_grad_(True)
+        self.text_embeds = save_data["text_embeds"].to(self.args.device).detach().requires_grad_(False)
+        self.graph_encoder_lr = save_data["graph_encoder_lr"].to(self.args.device).detach().requires_grad_(True)
+        self.text_encoder_lr = save_data["text_encoder_lr"].to(self.args.device).detach().requires_grad_(True)
+        self.edge_index = save_data["edge_index"].to(self.args.device).detach().requires_grad_(False)
 
     def compute_grad(self, loss):
         grad = torch.autograd.grad(loss, [self.node_f, self.graph_encoder_lr, self.text_encoder_lr], allow_unused=True)

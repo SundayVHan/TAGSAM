@@ -265,3 +265,24 @@ class LinkPredictor(nn.Module):
         pred_21 = torch.sigmoid(self.mlp(x_21)).squeeze(-1)
         
         return (pred_12 + pred_21) / 2
+
+    def inference(self, syn_text_embeds):
+        with torch.no_grad():
+            args = self.args
+
+            num_nodes = len(syn_text_embeds)
+            indices = torch.triu_indices(num_nodes, num_nodes, offset=1, device=args.device)
+            src_nodes, dst_nodes = indices[0], indices[1]
+        
+            pred = self(syn_text_embeds[src_nodes], syn_text_embeds[dst_nodes])
+            
+            num_edges = min(int(num_nodes * args.degree), len(pred))  
+            topk_values, topk_indices = torch.topk(pred, num_edges)
+            
+            edge_index_upper = torch.stack([src_nodes[topk_indices], dst_nodes[topk_indices]], dim=0)
+            edge_index_lower = torch.stack([edge_index_upper[1], edge_index_upper[0]], dim=0)
+            self_loops = torch.arange(num_nodes, device=args.device)
+            self_loops = torch.stack([self_loops, self_loops], dim=0)
+        
+            syn_edge_index = torch.cat([edge_index_upper, edge_index_lower, self_loops], dim=1)
+        return syn_edge_index

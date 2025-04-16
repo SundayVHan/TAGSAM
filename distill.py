@@ -18,7 +18,7 @@ def main(args):
     wandb.init(
         project="TAGSAM",
         group="distill",
-        name=args.name,
+        name=f"{args.name}-degree",
         config=args,
     )
     graph_dataset = GraphDataset(args)
@@ -28,49 +28,21 @@ def main(args):
     expert_model.load_state_dict(expert_state)
     expert_model.eval()
 
-    save_it_pool = np.arange(0, args.syn_iteration+1, args.save_interval).tolist()
-
-    match_loss = wBCELoss()
-    match_sampler = NeighborSampler(
-        graph_dataset.edge_index,
-        node_idx=torch.arange(len(graph_dataset)),
-        sizes=args.sample_size, 
-        batch_size=args.syn_match,
-        shuffle=True, 
-        num_workers=0
-    )
-
-    _, expert_acc = epoch_test(model=expert_model, dataset=graph_dataset, args=args)
+    expert_val, expert_acc = epoch_test(model=expert_model, dataset=graph_dataset, args=args)
     tqdm.write(f"Expert Acc: {expert_acc}")
     wandb.summary["expert_acc"] = expert_acc
 
     graph_syn, text_syn = select_text(graph_dataset, args)
 
     link_model = LinkPredictor(args.gnn_hidden_dim).to(args.device)
-    link_model.load_state_dict(torch.load(os.path.join(str(args.buffer_save_dir), f"link_model.pt"), map_location=args.device))
+    link_model.load_state_dict(torch.load(os.path.join(str(args.buffer_save_dir), f"link_model.pt"), map_location=args.device, weights_only=True))
     link_model.eval()
     
-    with torch.no_grad():
-        syn_text_embeds = expert_model.text_encoder(text_syn)
+    syn_text_embeds = expert_model.text_encoder(text_syn)
+    syn_edge_index = link_model.inference(syn_text_embeds)
+    tqdm.write(f"Generated {syn_edge_index.size(1)} edges for {len(text_syn)} nodes")
+    del link_model    
     
-        num_nodes = len(text_syn)
-        indices = torch.triu_indices(num_nodes, num_nodes, offset=1, device=args.device)
-        src_nodes, dst_nodes = indices[0], indices[1]
-    
-        pred = link_model(syn_text_embeds[src_nodes], syn_text_embeds[dst_nodes])
-        
-        num_edges = min(num_nodes * 3, len(pred))  
-        # 选择预测值最大的 k 条边
-        topk_values, topk_indices = torch.topk(pred, num_edges)
-        
-        edge_index_upper = torch.stack([src_nodes[topk_indices], dst_nodes[topk_indices]], dim=0)
-        edge_index_lower = torch.stack([edge_index_upper[1], edge_index_upper[0]], dim=0)
-        self_loops = torch.arange(num_nodes, device=args.device)
-        self_loops = torch.stack([self_loops, self_loops], dim=0)
-    
-        syn_edge_index = torch.cat([edge_index_upper, edge_index_lower, self_loops], dim=1)
-        tqdm.write(f"Generated {syn_edge_index.size(1)} edges for {num_nodes} nodes")
-        
     syn_dataset = SynGraphDataset(args)
     syn_dataset.init(graph_syn, text_syn, syn_edge_index)
 
@@ -83,8 +55,20 @@ def main(args):
         batch_size=args.syn_batch_size_train,
     )
 
+    outer_sampler = NeighborSampler(
+        graph_dataset.edge_index,
+        node_idx=torch.arange(len(graph_dataset)),
+        sizes=args.sample_size, 
+        batch_size=args.syn_match,
+        shuffle=True, 
+        num_workers=0
+    )
+
+    match_loss = wBCELoss()
+
     best_val = 0
     best_acc = 0
+    save_it_pool = np.arange(0, args.syn_iteration+1, args.save_interval).tolist()
     for it in tqdm(range(args.syn_iteration+1), desc="distill", position=0, leave=True):
         if it in save_it_pool:
             syn_dataset.save(it)
@@ -115,7 +99,7 @@ def main(args):
                 args=args
             )
 
-        match_size, match_idx, match_adjs = next(iter(match_sampler))
+        match_size, match_idx, match_adjs = next(iter(outer_sampler))
         match_node_f = graph_dataset.node_f[match_idx].to(args.device)
         match_adjs = [adj.to(args.device) for adj in match_adjs]
         match_text_embeds = graph_dataset.text_embeds[match_idx[:match_size]].to(args.device)
@@ -163,6 +147,7 @@ if __name__ == "__main__":
     parser.add_argument("--syn_num_summary", type=int, default=4)
     parser.add_argument("--syn_ratio_summary", type=float, default=60.0)
     parser.add_argument("--save_interval", type=int, default=500)
+    parser.add_argument("--degree", type=float, default=1.5)
 
     # eval
     parser.add_argument("--batch_size_train", type=int, default=20)

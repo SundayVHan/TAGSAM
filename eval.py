@@ -66,8 +66,8 @@ if __name__ == '__main__':
     parser.add_argument("--dataset_name", type=str, default="computer")
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--it", type=int, default=0)
-    parser.add_argument("--syn_size", type=int, default=200)
+    parser.add_argument("--it", type=int, default=5000)
+    parser.add_argument("--syn_size", type=int, default=100)
     parser.add_argument("--syn_num_summary", type=int, default=4)
     parser.add_argument("--syn_ratio_summary", type=float, default=60.0)
     parser.add_argument("--syn_lr", type=float, default=100)
@@ -76,8 +76,8 @@ if __name__ == '__main__':
     parser.add_argument("--run_name", type=str, default="")
 
     # eval
-    parser.add_argument("--batch_size_train", type=int, default=32)
-    parser.add_argument("--batch_size_test", type=int, default=4096)
+    parser.add_argument("--batch_size_train", type=int, default=20)
+    parser.add_argument("--batch_size_test", type=int, default=2048)
     parser.add_argument("--num_epoch_train", type=int, default=15)
     parser.add_argument("--eval_time", type=int, default=1)
 
