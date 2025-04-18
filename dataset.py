@@ -97,14 +97,17 @@ class GraphDataset:
         
         val_indices = {}
         test_indices = {}
+
+        val_ratio = 0.2
+        test_ratio = 0.8 if self.args.dataset_name=="cora" else 0.2
         
         for label in filtered_labels:
             indices = np.array(label_to_sample_index[label])
             np.random.shuffle(indices)
             size = len(indices)
             
-            val_size = int(size * 0.2)
-            test_size = int(size * 0.2)
+            val_size = int(size * val_ratio)
+            test_size = int(size * test_ratio)
             
             val_indices[label] = indices[:val_size]
             test_indices[label] = indices[val_size:val_size + test_size]
@@ -232,7 +235,6 @@ class SynGraphDataset(GraphDataset):
         self.node_f.grad = grad[0]
         self.graph_encoder_lr.grad = grad[1]
         self.text_encoder_lr.grad = grad[2]
-        torch.nn.utils.clip_grad_norm_(self.node_f, 5)
 
     def step(self):
         self.optimizer.step()
