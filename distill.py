@@ -13,12 +13,13 @@ from model import CLIP, wBCELoss, LinkPredictor
 from reparam import ReparamModule
 from selection import select_text
 from eval import eval_syn
+import time
 
 def main(args):
     wandb.init(
         project="TAGSAM",
         group="distill",
-        name=f"{args.name}-degree",
+        name=f"{args.name}",
         config=args,
     )
     graph_dataset = GraphDataset(args)
@@ -66,9 +67,17 @@ def main(args):
 
     match_loss = wBCELoss()
 
-    best_val = 0
-    best_acc = 0
+    best_val = 0.0
+    best_acc = 0.0
     save_it_pool = np.arange(0, args.syn_iteration+1, args.save_interval).tolist()
+    
+    time_stats = {
+        'model_init': 0.0,
+        'inner_loop': 0.0,
+        'outer_loop': 0.0,
+        'grad_update': 0.0
+    }
+    
     for it in tqdm(range(args.syn_iteration+1), desc="distill", position=0, leave=True):
         if it in save_it_pool:
             syn_dataset.save(it)
@@ -80,14 +89,17 @@ def main(args):
                 "val": mean_val,
                 "acc": mean_acc,
             })
+            torch.cuda.empty_cache()
 
-        # torch.cuda.empty_cache()
         syn_dataset.set_train_model()
         syn_dataset.zero_grad()
 
+        t_start = time.time()
         student_model = ReparamModule(CLIP(args)).to(args.device)
         student_param = torch.cat([p.detach().reshape(-1) for p in student_model.parameters()], dim=0).requires_grad_(True)
+        time_stats['model_init'] += time.time() - t_start
 
+        t_start = time.time()
         for step in range(args.syn_loop):
             _, student_param = epoch_train_manual(
                 model=student_model,
@@ -98,23 +110,31 @@ def main(args):
                 text_encoder_lr=syn_dataset.text_encoder_lr,
                 args=args
             )
+        time_stats['inner_loop'] += time.time() - t_start
 
+        t_start = time.time()
         match_size, match_idx, match_adjs = next(iter(outer_sampler))
         match_node_f = graph_dataset.node_f[match_idx].to(args.device)
         match_adjs = [adj.to(args.device) for adj in match_adjs]
         match_text_embeds = graph_dataset.text_embeds[match_idx[:match_size]].to(args.device)
         with torch.no_grad():
             expert_logits = expert_model(match_node_f, match_adjs, match_text_embeds, is_eval=True)
-
         student_logits = student_model(match_node_f, match_adjs, match_text_embeds, is_eval=True, flat_param=student_param)
+        time_stats['outer_loop'] += time.time() - t_start
 
+        t_start = time.time()
         syn_loss = match_loss(student_logits, expert_logits)
-
         syn_dataset.compute_grad(syn_loss)
         syn_dataset.step()
+        time_stats['grad_update'] += time.time() - t_start
 
         if it % 10 == 0:
             tqdm.write(f"syn_loss: {syn_loss.item()}")
+            avg_times = {k: v/(it+1) for k, v in time_stats.items()}
+            tqdm.write(f"Average time per iteration - Model Init: {avg_times['model_init']:.3f}s, "
+                      f"Inner Loop: {avg_times['inner_loop']:.3f}s, "
+                      f"Outer Loop: {avg_times['outer_loop']:.3f}s, "
+                      f"Grad Update: {avg_times['grad_update']:.3f}s")
 
         wandb.log({
             "loss": syn_loss.item(),

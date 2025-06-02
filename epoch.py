@@ -1,5 +1,4 @@
 import math
-import time
 
 import numpy as np
 import torch
@@ -111,14 +110,12 @@ def epoch_train_manual(
         text_embeds = dataset.text_embeds[n_id[:batch_size]].to(args.device)
         adjs = [adj.to(args.device) for adj in adjs]
 
-        # 计算损失
         loss, logits = model(node_f, adjs, text_embeds, flat_param=param)
         
-        # 手动更新参数
         graph_mask = model.get_params_mask_for_module("graph_encoder", param)
         text_mask = model.get_params_mask_for_module("text_encoder", param)
         grad = torch.autograd.grad(loss, param, create_graph=True)[0]
-        
+            
         graph_grad = torch.where(graph_mask, grad, torch.tensor(0.0, device=args.device))
         text_grad = torch.where(text_mask, grad, torch.tensor(0.0, device=args.device))
         step = graph_encoder_lr * graph_grad + text_encoder_lr * text_grad
@@ -143,26 +140,38 @@ def epoch_train_link(
 
     pos_edge_index = dataset.edge_index.to(args.device)
     num_edges = pos_edge_index.size(1)
-    batch_size = 204800
+    batch_size = args.batch_size_train
     num_batches = math.ceil(num_edges / batch_size)
     
     total_loss = 0
     total_auc = 0
+
+    embeds = []
+
+    text_embeds = dataset.text_embeds.to(args.device)
+    for i in range(0, text_embeds.size(0), 10240):
+        chunk = text_embeds[i: i + 10240].to(args.device)
+        with torch.no_grad():
+            emb_chunk = model.encode_text(chunk)
+        embeds.append(emb_chunk)
+    text_embeddings = torch.cat(embeds, dim=0)
+
+    full_neg = negative_sampling(
+        edge_index=pos_edge_index.to("cpu"),
+        num_nodes=len(dataset),
+        num_neg_samples=num_edges,
+        method='sparse'
+    )  # shape [2, num_edges*3]
     
-    for i in range(num_batches):
+    for i in tqdm(range(num_batches)):
         start_idx = i * batch_size
         end_idx = min((i + 1) * batch_size, num_edges)
-        
-        # 获取当前批次的正样本边
         batch_pos_edge = pos_edge_index[:, start_idx:end_idx]
-        
-        # 为当前批次生成负样本边
-        batch_neg_edge = negative_sampling(
-            edge_index=pos_edge_index,
-            num_nodes=dataset.node_f.size(0),
-            num_neg_samples=(end_idx - start_idx) * 3,
-            method='sparse'
-        ).to(args.device)
+
+        # start_idx = i * batch_size * 3
+        # end_idx = start_idx + batch_size * 3
+        batch_neg_edge = full_neg[:, start_idx:end_idx]
+        batch_neg_edge = batch_neg_edge.to(args.device)
 
         # 合并当前批次的边和标签
         edge_label_index = torch.cat([batch_pos_edge, batch_neg_edge], dim=1)
@@ -171,14 +180,10 @@ def epoch_train_link(
             torch.zeros(batch_neg_edge.size(1))
         ]).to(args.device)
 
-        # 获取节点特征
-        with torch.no_grad():
-            text_embeddings = model.encode_text(dataset.text_embeds.to(args.device))
-
         # 预测边的概率
         pred = decoder(
             text_embeddings[edge_label_index[0]],
-            text_embeddings[edge_label_index[1]]
+            text_embeddings[edge_label_index[1]],
         )
 
         # 计算损失
